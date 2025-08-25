@@ -84,7 +84,11 @@ class Standard_Scaler(Target_Transform):
             self.params = {'mu': X_v.mean(), 'sd': X_v.std()}
         else:
             self._validate_fit()
-        return (X-self.params['mu'])/self.params['sd']
+        if self.params["sd"] == 0:
+            # In the edge case where `X` is degenerate, avoid 0 divided by 0
+            return zeros_like(X)
+        else:
+            return (X-self.params['mu'])/self.params['sd']
     
     def inverse(self, X):
         """Inverse transform the transformed data X_t"""
