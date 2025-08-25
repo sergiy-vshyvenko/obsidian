@@ -1,5 +1,78 @@
 # Changelog
 
+## [Untracked Changes]
+
+### Added
+- Factor plots can take objectives
+
+### Modified
+- Bugfix for correlation plot respecting minimized targets
+- Improvements to objective visualization
+
+## [0.8.6]
+### Added
+- Improved methods for fitting PyTorch surrogates, including auto-stopping by parameter value norm
+
+### Modified
+- Greatly reduced the number of samples for DNN posterior, speeding up optimization
+- Stabilized the mean estimate of ensemble surrogates by avoiding resampling
+- Disabled root caching for ensemble surrogates during optimization
+- Increased the maximum length of a category name to 32 characters
+- Bug fix for incorrect symmetry in correlation calculation of calc_ofat_ranges
+- OFAT range calcs and plots now respect minimum targets and not just maximum
+
+## [0.8.5]
+### Added
+- More optional outputs for verbose settings
+- Parameters in ParamSpace can also be indexed by name
+- Parameters now have search_space property, to modify the optimizer search space from the full space
+- Continuous parameters have search_min/search_max; Discete parameteres have search_categories
+- Constraints are now defined by Constraint class
+- Input constraints can now be included in ParamSpace, and serialized from there
+- Output constraints can now be included in Campaign, and serialized from there
+- New interface class IParamSpace to address circular import issues between ParamSpace and Constraint
+
+### Modified
+- Optimizer and Campaign X_space attributes are now assigned using setter
+- Optimizer.maximize() appropriately recognizes fixed_var argument
+
+### Removed
+- Torch device references and options (GPU compatibility may be re-added)
+
+## [0.8.4]
+### Added
+- Campaign X_best method
+- Optimizer X_best_f attribute(s)
+- Sequence of colors "color_list" to branding
+- Informative hoverdata for MDS plot
+- Created Product_Objective and Divide_Objective
+
+### Modified
+- Switched all usages of X_ref = X_space.mean() to optimizer.X_best_f
+- Refactored mpl "visualize_inputs" as plotly "visualize_inputs" for better interactivity
+- Text formatting for some plotly hoverdata
+
+## [0.8.3]
+### Added
+- Default values for NParEGO scalarization_weights
+- SHAP PDP ICE plots now work with categorical values
+- Added scikit-learn to dependencies, for MDS
+- Added MDS plot
+
+### Modified
+- SHAP PDP ICE plots must now have color and x-axis indices that are distinct
+
+## [0.8.2]
+### Added
+- Project metadata properly captured on PyPI based on changes in pyproject.toml
+
+## [0.8.1]
+### Modified
+- Fixed infobar on dash app
+- Better handling of X_space on dash app
+- Bug fixes for optim_progress
+- Improved color and axes of parity_plot
+
 ## [0.8.0]
 ### Added
 - Major improvements to testing and numerous small bug fixes to improve code robustness

@@ -142,6 +142,13 @@ string_list = ['A', 'B', 'C', 'D']
 
 
 @pytest.mark.fast
+def test_param_indexing():
+    X_space = ParamSpace(test_params)
+    p0 = X_space[0]
+    p0 = X_space['Parameter 1']
+
+
+@pytest.mark.fast
 def test_numeric_param_validation():
     # Strings for numeric
     with pytest.raises(TypeError):
@@ -159,10 +166,15 @@ def test_numeric_param_validation():
 
 @pytest.mark.fast
 def test_discrete_param_validation():
-    # Numeric for categoroical
+    # Numeric for categorical
     with pytest.raises(TypeError):
         param = Param_Categorical('test', categories=numeric_list)
-        
+
+    # Too long of a string
+    with pytest.raises(ValueError):
+        param = Param_Categorical('test', categories=string_list
+                                  + ['test'*64])
+
     # Value not in categories
     with pytest.raises(ValueError):
         param = Param_Categorical('test', categories=string_list)

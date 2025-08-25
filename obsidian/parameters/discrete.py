@@ -37,7 +37,7 @@ class Param_Discrete(Parameter):
         Returns:
             np.ndarray: Values mapped to the unit interval [0, 1].
         """
-        X_str = X.flatten().astype('U11')
+        X_str = X.flatten().astype('U32')
         indices = [self.categories.index(x) for x in X_str]
         return (np.array(indices)/self.nc).reshape(X.shape)
     
@@ -54,7 +54,7 @@ class Param_Discrete(Parameter):
         """
 
         return np.array(self.categories)[(X.flatten()*self.nc)
-                                         .astype('int')].reshape(X.shape).astype('U11')
+                                         .astype('int')].reshape(X.shape).astype('U32')
 
     @property
     def min(self):
@@ -71,6 +71,23 @@ class Param_Discrete(Parameter):
         """Maximum parameter value (nc-1)"""
         return self.nc-1
         
+    def set_search(self,
+                   search_categories: list[str]):
+        """
+        Set the search space for the parameter
+
+        Args:
+            search_categories (list[str]): The search space for the parameter.
+        """
+        for c in search_categories:
+            self._validate_value(c)
+            
+        self.search_categories = search_categories
+    
+    def open_search(self):
+        """Set the search space to the parameter space"""
+        self.set_search(self.categories)
+    
     def _validate_value(self,
                         value: str):
         """
@@ -83,6 +100,9 @@ class Param_Discrete(Parameter):
             KeyError: If the value is not in the list of categories.
             TypeError: If the value is not a string
         """
+        if len(value) > 32:
+            raise ValueError(f'Category names must be <= 32 characters. Too long value encountered: {value}')
+
         if not isinstance(value, str):
             raise TypeError(f'Value {value} is not a string')
         
@@ -91,14 +111,25 @@ class Param_Discrete(Parameter):
 
     def __init__(self,
                  name: str,
-                 categories: str | list[str]):
+                 categories: str | list[str],
+                 search_categories: list[str] = None):
         super().__init__(name=name)
         if isinstance(categories, str):
             self.categories = categories.split(',')
+            self.categories = [c.rstrip().lstrip() for c in self.categories]
         else:
             self.categories = categories
         for c in self.categories:
             self._validate_value(c)
+        
+        # Set the search space to the parameter space by default
+        if not search_categories:
+            search_categories = self.categories
+        else:
+            if isinstance(categories, str):
+                search_categories = search_categories.split(',')
+                search_categories = [c.rstrip().lstrip() for c in search_categories]
+        self.set_search(search_categories)
     
     def __repr__(self):
         """String representation of object"""
@@ -129,7 +160,7 @@ class Param_Categorical(Param_Discrete):
     # No decorator on this, we need to handle dataframes
     def encode(self, X: str | ArrayLike):
         """Encode parameter to a format that can be used for training"""
-        X_str = np.array(X).flatten().astype('U11')
+        X_str = np.array(X).flatten().astype('U32')
         X_cat = pd.Series(X_str).astype(pd.CategoricalDtype(categories=self.categories))
         X_ohe = pd.get_dummies(X_cat, prefix_sep=CAT_SEP, dtype=float, prefix=self.name)
 
@@ -154,7 +185,7 @@ class Task(Param_Discrete):
     @transform_with_type
     def decode(self, X: np.ndarray):
         """Decode parameter from transformed space"""
-        return np.array(self.unit_demap(X/self.nc)).astype('U11')
+        return np.array(self.unit_demap(X/self.nc)).astype('U32')
 
 
 class Param_Discrete_Numeric(Param_Discrete):
@@ -183,21 +214,29 @@ class Param_Discrete_Numeric(Param_Discrete):
 
     def __init__(self,
                  name,
-                 categories: list[int | float]):
+                 categories: list[int | float],
+                 search_categories: list[int | float] = None):
         
         if not isinstance(categories, list):
             raise TypeError('Categories must be a number or list of numbers')
-               
-        self.categories = categories
-        for c in self.categories:
-            self._validate_value(c)
-        
+
         self.name = name
         self.categories = categories if isinstance(categories, list) else [categories]
         self.categories.sort()
-        for c in categories:
+        for c in self.categories:
             self._validate_value(c)
-
+        
+        # Set the search space to the parameter space by default
+        if not search_categories:
+            search_categories = self.categories
+        else:
+            if not isinstance(search_categories, list):
+                search_categories = [search_categories]
+            for c in search_categories:
+                self._validate_value(c)
+        search_categories.sort()
+        self.set_search(search_categories)
+    
     def _validate_value(self,
                         value: int | float):
         """

@@ -2,6 +2,7 @@
 
 from .base import SurrogateModel
 from .config import model_class_dict
+from .utils import fit_pytorch
 
 from obsidian.utils import tensordict_to_dict, dict_to_tensordict
 from obsidian.exceptions import SurrogateFitError
@@ -10,11 +11,11 @@ from obsidian.config import TORCH_DTYPE
 from botorch.fit import fit_gpytorch_mll
 from botorch.optim.fit import fit_gpytorch_mll_torch, fit_gpytorch_mll_scipy
 from botorch.models.gpytorch import GPyTorchModel
+from botorch.models.ensemble import EnsembleModel
 from gpytorch.mlls import ExactMarginalLogLikelihood
 
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import numpy as np
 import pandas as pd
 import warnings
@@ -41,26 +42,20 @@ class SurrogateBoTorch(SurrogateModel):
             - ``'DNN'``: Dropout neural network. Uses MC sampling to mask neurons during training and
                 to estimate uncertainty.
               
-        device (str): The device on which the model is run.
         hps (dict): Optional surrogate function hyperparameters.
         mll (ExactMarginalLogLikelihood): The marginal log likelihood of the model.
         torch_model (torch.nn.Module): The torch model for the surrogate.
         loss (float): The loss of the model.
-        score (float): The R2 score of the model.
+        r2_score (float): The R2 score of the model.
     """
     def __init__(self,
                  model_type: str = 'GP',
                  seed: int | None = None,
-                 verbose: int | None = False,
+                 verbose: bool = False,
                  hps: dict = {}):
         
         super().__init__(model_type=model_type, seed=seed, verbose=verbose)
         
-        if torch.cuda.is_available():
-            self.device = 'cuda'
-        else:
-            self.device = 'cpu'
-
         # Optional surrogate function hyperparameters
         self.hps = hps
                 
@@ -102,16 +97,16 @@ class SurrogateBoTorch(SurrogateModel):
 
         if issubclass(model_class_dict[self.model_type], GPyTorchModel):
             if self.model_type == 'GP' and cat_dims:  # If cat_dims is not an empty list, returns True
-                self.torch_model = model_class_dict['MixedGP'](train_X=X_p, train_Y=y_p, cat_dims=cat_dims).to(self.device)
+                self.torch_model = model_class_dict['MixedGP'](train_X=X_p, train_Y=y_p, cat_dims=cat_dims)
             else:
                 if self.model_type == 'MTGP':
                     self.torch_model = model_class_dict[self.model_type](
-                        train_X=X_p, train_Y=y_p, task_feature=task_feature, **self.hps).to(self.device)
+                        train_X=X_p, train_Y=y_p, task_feature=task_feature, **self.hps)
                 else:
                     # Note: Doesn't matter if input empty dictionary as self.hps for model without those additional args
-                    self.torch_model = model_class_dict[self.model_type](train_X=X_p, train_Y=y_p, **self.hps).to(self.device)
+                    self.torch_model = model_class_dict[self.model_type](train_X=X_p, train_Y=y_p, **self.hps)
         else:
-            self.torch_model = model_class_dict[self.model_type](train_X=X_p, train_Y=y_p, **self.hps).to(self.device).to(TORCH_DTYPE)
+            self.torch_model = model_class_dict[self.model_type](train_X=X_p, train_Y=y_p, **self.hps).to(TORCH_DTYPE)
 
         return
 
@@ -143,6 +138,9 @@ class SurrogateBoTorch(SurrogateModel):
         self.task_feature = task_feature
         
         # Train
+        if self.verbose:
+            print('Fitting surrogate model [...]')
+        
         if isinstance(self.torch_model, GPyTorchModel):
             self.loss_fcn = ExactMarginalLogLikelihood(self.torch_model.likelihood, self.torch_model)
             if self.model_type == 'DKL':
@@ -159,17 +157,7 @@ class SurrogateBoTorch(SurrogateModel):
                     raise SurrogateFitError('BoTorch model failed to fit')
         else:
             self.loss_fcn = nn.MSELoss()
-            self.optimizer = optim.Adam(self.torch_model.parameters(), lr=1e-2)
-
-            self.torch_model.train()
-            for epoch in range(200):
-                self.optimizer.zero_grad()
-                output = self.torch_model(X_p)
-                loss = self.loss_fcn(output, y_p)
-                loss.backward()
-                self.optimizer.step()
-
-            self.torch_model.eval()
+            fit_pytorch(self.torch_model, X_p, y_p, loss_fcn=self.loss_fcn, verbose=self.verbose)
 
         self.is_fit = True
 
@@ -206,7 +194,7 @@ class SurrogateBoTorch(SurrogateModel):
         
         # Calculate a final loss and R2 train score
         loss = self.loss = self.loss_fcn(self.torch_model(X_p), y_p).sum().detach().cpu().data.numpy().tolist()
-        score = self.score = corr_matrix[0][1]**2
+        score = self.r2_score = corr_matrix[0][1]**2
         
         return loss, score
     
@@ -229,7 +217,14 @@ class SurrogateBoTorch(SurrogateModel):
         X_p = self._prepare(X)
         
         pred_posterior = self.torch_model.posterior(X_p)
-        mu = pred_posterior.mean.detach().cpu().squeeze(-1)
+
+        # We would prefer to have stability in the mean of ensemble models,
+        # So, we will not re-sample for prediction but use forward methods
+        if isinstance(self.torch_model, EnsembleModel):
+            mu = self.torch_model.forward(X_p).detach()
+        else:
+            mu = pred_posterior.mean.detach().cpu().squeeze(-1)
+
         if q is not None:
             if (q < 0) or (q > 1):
                 raise ValueError('Quantile must be between 0 and 1')
