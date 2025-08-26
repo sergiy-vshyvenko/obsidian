@@ -86,6 +86,7 @@ class Standard_Scaler(Target_Transform):
             self._validate_fit()
         if self.params["sd"] == 0:
             # In the edge case where `X` is degenerate, avoid 0 divided by 0
+            warnings.warn('Transform constant target values by mean subtraction', UserWarning)
             return zeros_like(X)
         else:
             return (X-self.params['mu'])/self.params['sd']
