@@ -1,6 +1,6 @@
 """Transformation functions to normalize output responses"""
 
-from torch import logit, sigmoid
+from torch import logit, sigmoid, zeros_like
 from abc import ABC, abstractmethod
 import warnings
 from torch import Tensor
