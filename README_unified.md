@@ -1,7 +1,7 @@
 # obsidian Unified APO Server
 
 A local web server that combines **obsidian**'s Dash UI with multi-optimizer support and benchmarking.
-Run four different Bayesian Optimisation backends side-by-side and compare their convergence on standard test functions.
+Run Bayesian Optimisation backends side-by-side and compare their convergence on standard test functions.
 
 ---
 
@@ -62,15 +62,67 @@ One new tab is added:
 | Name | Backend | Install | Notes |
 |---|---|---|---|
 | Obsidian | `obsidian.optimizer.BayesianOptimizer` | included | Always available |
-| BoFire | `bofire.strategies.SoboStrategy` | `pip install bofire` | Single-objective BO |
-| BayBe | `baybe.recommenders.BotorchRecommender` | `pip install baybe` | Stateless recommend API |
-| EDBO+ | `edbo.plus.optimizer_botorch.EDBOplus` | `pip install edbo` | Discrete-scope mode |
+| BoFire | `bofire.strategies.SoboStrategy` | `pip install bofire[optimization]` | Compatible with BayBe |
+| BayBe | `baybe.recommenders.BotorchRecommender` | `pip install baybe` | Compatible with BoFire |
+| EDBO+ | `edbo.plus.optimizer_botorch.EDBOplus` | see note below | **Separate env required** |
 
-The UI automatically detects which backends are installed and disables the toggles for missing ones.
+The UI automatically detects which backends are installed and disables toggles for missing ones.
 
-### EDBO+ note
+### EDBO+ — isolation required
 
-EDBOplus is designed for reaction optimisation over a **pre-defined discrete scope** (a list of all possible experiments). The wrapper here automatically materialises a fine grid over the continuous parameter space (30 points per dimension for ≤ 2D, 1 000 LHS points for higher dimensions) to serve as the scope.
+EDBO+ pins very old versions of core packages (`botorch==0.5.0`, `torch==1.10.0`,
+`numpy==1.21.5`, `pandas==1.3.4`) that **directly conflict** with BoFire and BayBe.
+It cannot be installed in the same environment as either of those two libraries.
+
+**Recommended approach: use a dedicated conda environment for EDBO+.**
+
+```bash
+conda create -n edboplus python=3.10
+conda activate edboplus
+pip install edbo          # installs its pinned deps
+pip install -e .          # install obsidian itself
+python app_unified.py     # only Obsidian + EDBO+ will be available
+```
+
+For the combined Obsidian + BoFire + BayBe environment (EDBO+ excluded):
+
+```bash
+conda create -n boopt python=3.11
+conda activate boopt
+pip install -e .
+pip install bofire[optimization] baybe
+python app_unified.py
+```
+
+### EDBO+ scope note
+
+EDBOplus is designed for reaction optimisation over a **pre-defined discrete scope**.
+The wrapper here automatically materialises a fine grid over the continuous parameter
+space (30 points per dimension for ≤ 2D, 1 000 LHS points otherwise) to serve as the
+scope, matching how EDBO+ is typically used in practice.
+
+---
+
+## Dependency compatibility matrix
+
+| Package | BoFire | BayBe | EDBO+ |
+|---|---|---|---|
+| `botorch` | `>=0.16.1` | `>=0.13.0,<1` | `==0.5.0` ❌ |
+| `gpytorch` | via botorch | `>=1.9.1,<2` | `==1.5.1` ❌ |
+| `torch` | via botorch | `>=1.13.1,<3` | `==1.10.0` ❌ |
+| `numpy` | unconstrained | `>=1.24.1,<3` | `==1.21.5` ❌ |
+| `pandas` | unconstrained | `>=1.4.2,<3` | `==1.3.4` ❌ |
+| `scipy` | `>=1.7` | `>=1.10.1` | `>=1.10.0` ✅ |
+| `scikit-learn` | `>=1.0.0` | `>=1.1.1,<2` | `>=1.4` ✅ |
+| `sympy` | `>=1.12` | — | `==1.9` ❌ |
+| `pymoo` | `>=0.6.0` | — | `==0.5.0` ❌ |
+| Python | `>=3.10,<3.15` | `>=3.10,<3.15` | 3.9–3.11 ✅ |
+
+✅ Compatible &nbsp;&nbsp; ❌ Incompatible (irreconcilable version conflict)
+
+**BoFire and BayBe are mutually compatible** and can share one environment.  
+**EDBO+ requires its own isolated environment** due to ancient pinned versions of
+`botorch`, `torch`, `numpy`, and `pandas`.
 
 ---
 
@@ -140,7 +192,7 @@ for r in results:
 2. Implement the five abstract methods.
 3. Append your class to the `ALL_WRAPPERS` list at the bottom of the file.
 
-The UI will pick it up automatically on the next server start.
+The UI picks it up automatically on the next server start.
 
 ### Adding a new benchmark function
 
@@ -149,31 +201,30 @@ The UI will pick it up automatically on the next server start.
 
 ---
 
-## Dependencies
+## Installation recipes
 
-### Required (obsidian core)
-
-```
-dash
-dash-bootstrap-components
-plotly
-pandas
-numpy
-torch
-botorch
-```
-
-### Optional backends
+### Obsidian + BoFire + BayBe (recommended)
 
 ```bash
-# BoFire
-pip install bofire
+conda create -n boopt python=3.11
+conda activate boopt
+pip install -e .
+pip install "bofire[optimization]" baybe
+```
 
-# BayBe
-pip install baybe
+### Obsidian + EDBO+ (isolated)
 
-# EDBO+
-pip install edbo          # or install from the edboplus repo
+```bash
+conda create -n edboplus python=3.10
+conda activate edboplus
+pip install edbo
+pip install -e .
+```
+
+### Obsidian only (no optional backends)
+
+```bash
+pip install -e .
 ```
 
 ---
