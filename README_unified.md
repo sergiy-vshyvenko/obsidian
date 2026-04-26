@@ -8,13 +8,18 @@ Run Bayesian Optimisation backends side-by-side and compare their convergence on
 ## Quick start
 
 ```bash
-# Install obsidian and optional backends (see Dependencies below)
-pip install -e .
+# Clone and install obsidian with the Dash app extras
+git clone <repo>
+cd obsidian
+pip install -e ".[app]"
 
 # Launch the server
 python app_unified.py
 # → open http://127.0.0.1:8050
 ```
+
+> **Note:** plain `pip install -e .` installs the core library only.
+> The Dash UI (and Pillow for the logo) live in the `[app]` extra.
 
 ---
 
@@ -61,68 +66,76 @@ One new tab is added:
 
 | Name | Backend | Install | Notes |
 |---|---|---|---|
-| Obsidian | `obsidian.optimizer.BayesianOptimizer` | included | Always available |
-| BoFire | `bofire.strategies.SoboStrategy` | `pip install bofire[optimization]` | Compatible with BayBe |
+| Obsidian | `obsidian.optimizer.BayesianOptimizer` | `pip install -e ".[app]"` | Always available |
+| BoFire | `bofire.strategies.SoboStrategy` | `pip install "bofire[optimization]"` | Compatible with BayBe |
 | BayBe | `baybe.recommenders.BotorchRecommender` | `pip install baybe` | Compatible with BoFire |
 | EDBO+ | `edbo.plus.optimizer_botorch.EDBOplus` | see note below | **Separate env required** |
 
 The UI automatically detects which backends are installed and disables toggles for missing ones.
 
-### EDBO+ — isolation required
-
-EDBO+ pins very old versions of core packages (`botorch==0.5.0`, `torch==1.10.0`,
-`numpy==1.21.5`, `pandas==1.3.4`) that **directly conflict** with BoFire and BayBe.
-It cannot be installed in the same environment as either of those two libraries.
-
-**Recommended approach: use a dedicated conda environment for EDBO+.**
-
-```bash
-conda create -n edboplus python=3.10
-conda activate edboplus
-pip install edbo          # installs its pinned deps
-pip install -e .          # install obsidian itself
-python app_unified.py     # only Obsidian + EDBO+ will be available
-```
-
-For the combined Obsidian + BoFire + BayBe environment (EDBO+ excluded):
-
-```bash
-conda create -n boopt python=3.11
-conda activate boopt
-pip install -e .
-pip install bofire[optimization] baybe
-python app_unified.py
-```
-
-### EDBO+ scope note
-
-EDBOplus is designed for reaction optimisation over a **pre-defined discrete scope**.
-The wrapper here automatically materialises a fine grid over the continuous parameter
-space (30 points per dimension for ≤ 2D, 1 000 LHS points otherwise) to serve as the
-scope, matching how EDBO+ is typically used in practice.
-
 ---
 
-## Dependency compatibility matrix
+## Dependency compatibility
 
-| Package | BoFire | BayBe | EDBO+ |
-|---|---|---|---|
-| `botorch` | `>=0.16.1` | `>=0.13.0,<1` | `==0.5.0` ❌ |
-| `gpytorch` | via botorch | `>=1.9.1,<2` | `==1.5.1` ❌ |
-| `torch` | via botorch | `>=1.13.1,<3` | `==1.10.0` ❌ |
-| `numpy` | unconstrained | `>=1.24.1,<3` | `==1.21.5` ❌ |
-| `pandas` | unconstrained | `>=1.4.2,<3` | `==1.3.4` ❌ |
-| `scipy` | `>=1.7` | `>=1.10.1` | `>=1.10.0` ✅ |
-| `scikit-learn` | `>=1.0.0` | `>=1.1.1,<2` | `>=1.4` ✅ |
-| `sympy` | `>=1.12` | — | `==1.9` ❌ |
-| `pymoo` | `>=0.6.0` | — | `==0.5.0` ❌ |
-| Python | `>=3.10,<3.15` | `>=3.10,<3.15` | 3.9–3.11 ✅ |
+### Full matrix
+
+| Package | Obsidian | BoFire | BayBe | EDBO+ |
+|---|---|---|---|---|
+| `botorch` | `>=0.11.1,<1` ✅ | `>=0.16.1` ✅ | `>=0.13.0,<1` ✅ | `==0.5.0` ❌ |
+| `gpytorch` | `^1.11` | via botorch | `>=1.9.1,<2` ✅ | `==1.5.1` ❌ |
+| `torch` | `>=2.3.0,<3` | via botorch | `>=1.13.1,<3` ✅ | `==1.10.0` ❌ |
+| `numpy` | `^1.26` | unconstrained | `>=1.24.1,<3` ✅ | `==1.21.5` ❌ |
+| `pandas` | `^2.2.2` | unconstrained | `>=1.4.2,<3` ✅ | `==1.3.4` ❌ |
+| `scipy` | `^1.13.1` | `>=1.7` ✅ | `>=1.10.1` ✅ | `>=1.10.0` ✅ |
+| `scikit-learn` | `^1.5.1` (opt) | `>=1.0.0` ✅ | `>=1.1.1,<2` ✅ | `>=1.4` ✅ |
+| `dash` | optional `[app]` | — | — | — |
+| `pillow` | optional `[app]` | — | — | — |
 
 ✅ Compatible &nbsp;&nbsp; ❌ Incompatible (irreconcilable version conflict)
 
-**BoFire and BayBe are mutually compatible** and can share one environment.  
-**EDBO+ requires its own isolated environment** due to ancient pinned versions of
-`botorch`, `torch`, `numpy`, and `pandas`.
+### What changed in obsidian's `pyproject.toml`
+
+| Dep | Before | After | Reason |
+|---|---|---|---|
+| `botorch` | `^0.11.1` (→ `<0.12`) | `>=0.11.1,<1` | BoFire needs `>=0.16.1`, BayBe needs `>=0.13.0` |
+| `torch` | `==2.3.0` (exact pin) | `>=2.3.0,<3` | BayBe allows `<3`; exact pin prevents upgrades |
+| `pillow` | missing | `>=9.0` (optional `[app]`) | `app.py` and `app_unified.py` use `PIL.Image` |
+
+### Environments
+
+**Obsidian + BoFire + BayBe (recommended for multi-optimizer benchmarking):**
+```bash
+conda create -n boopt python=3.11
+conda activate boopt
+pip install -e ".[app]"
+pip install "bofire[optimization]" baybe
+python app_unified.py
+```
+
+**Obsidian only (no optional backends):**
+```bash
+pip install -e ".[app]"
+python app_unified.py   # only Obsidian optimizer available
+```
+
+**EDBO+ (isolated — cannot share env with BoFire or BayBe):**
+```bash
+conda create -n edboplus python=3.10
+conda activate edboplus
+pip install edbo
+pip install -e ".[app]"
+python app_unified.py   # only Obsidian + EDBO+ available
+```
+
+### Why EDBO+ must be isolated
+
+EDBO+ pins `botorch==0.5.0` (2021), `torch==1.10.0`, `numpy==1.21.5`, and
+`pandas==1.3.4` — all irreconcilably older than what Obsidian, BoFire, and BayBe
+require. It cannot share a pip environment with any of the other three.
+
+The EDBO+ wrapper also materialises a fine grid over the continuous parameter space
+(30 points/dim for ≤2D, 1 000 LHS points otherwise) as its discrete scope, which is
+how EDBO+ is designed to work in reaction-optimisation workflows.
 
 ---
 
@@ -136,7 +149,7 @@ scope, matching how EDBO+ is typically used in practice.
 | `hartmann3` | 3 | 3.8628 | Multi-local-optima |
 | `ackley2d` | 2 | 0.0 at origin | Highly multimodal |
 
-All functions are **maximised** (minimisation functions are negated so the UI convention is consistent).
+All functions are **maximised** (minimisation functions are negated for consistent UI convention).
 
 ---
 
@@ -155,8 +168,6 @@ app_unified.py                 # entry point
 
 ### Optimizer wrapper interface
 
-Every backend is wrapped behind a common five-method interface:
-
 ```python
 wrapper.setup(param_bounds, minimize)   # configure parameter space
 wrapper.initialize(n_init, seed)        # generate initial DoE → DataFrame
@@ -165,7 +176,7 @@ wrapper.suggest(n)                      # propose next point(s) → DataFrame
 wrapper.is_available()                  # True if backend is importable
 ```
 
-### Running a benchmark programmatically
+### Running benchmarks programmatically
 
 ```python
 from obsidian.unified import (
@@ -190,42 +201,12 @@ for r in results:
 
 1. Subclass `BaseOptimizerWrapper` in `obsidian/unified/optimizer_wrappers.py`.
 2. Implement the five abstract methods.
-3. Append your class to the `ALL_WRAPPERS` list at the bottom of the file.
-
-The UI picks it up automatically on the next server start.
+3. Append your class to `ALL_WRAPPERS` at the bottom of the file.
 
 ### Adding a new benchmark function
 
-1. Write a function `(X: pd.DataFrame) -> pd.Series` in `obsidian/unified/benchmarks.py`.
+1. Write `(X: pd.DataFrame) -> pd.Series` in `obsidian/unified/benchmarks.py`.
 2. Add a `BenchmarkFunction` entry to `BENCHMARK_REGISTRY`.
-
----
-
-## Installation recipes
-
-### Obsidian + BoFire + BayBe (recommended)
-
-```bash
-conda create -n boopt python=3.11
-conda activate boopt
-pip install -e .
-pip install "bofire[optimization]" baybe
-```
-
-### Obsidian + EDBO+ (isolated)
-
-```bash
-conda create -n edboplus python=3.10
-conda activate edboplus
-pip install edbo
-pip install -e .
-```
-
-### Obsidian only (no optional backends)
-
-```bash
-pip install -e .
-```
 
 ---
 
@@ -233,9 +214,11 @@ pip install -e .
 
 | File | Role |
 |---|---|
-| `app_unified.py` | Entry point — run this to start the server |
+| `app_unified.py` | Entry point — `python app_unified.py` |
 | `app.py` | Original obsidian server (unchanged) |
-| `obsidian/unified/optimizer_wrappers.py` | Adapter classes for each BO backend |
+| `pyproject.toml` | Dependency spec (botorch relaxed, pillow added) |
+| `obsidian/unified/optimizer_wrappers.py` | Adapter classes |
 | `obsidian/unified/benchmarks.py` | Test functions and registry |
 | `obsidian/unified/benchmark_runner.py` | `run_benchmark` / `run_comparison` |
 | `obsidian/unified/dash_benchmark.py` | Dash tab layout and callbacks |
+| `README_unified.md` | This file |
