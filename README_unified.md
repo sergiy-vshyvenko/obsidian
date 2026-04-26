@@ -103,7 +103,13 @@ The UI automatically detects which backends are installed and disables toggles f
 
 ### Environments
 
-**Obsidian + BoFire + BayBe (recommended for multi-optimizer benchmarking):**
+| Environment | Install command | Optimizers available |
+|---|---|---|
+| Recommended | `pip install -e ".[app]" "bofire[optimization]" baybe` | Obsidian + BoFire + BayBe |
+| Minimal | `pip install -e ".[app]"` | Obsidian only |
+| EDBO+ (isolated) | separate conda env — see below | Obsidian + EDBO+ |
+
+**Recommended — Obsidian + BoFire + BayBe:**
 ```bash
 conda create -n boopt python=3.11
 conda activate boopt
@@ -112,10 +118,10 @@ pip install "bofire[optimization]" baybe
 python app_unified.py
 ```
 
-**Obsidian only (no optional backends):**
+**Minimal — Obsidian only:**
 ```bash
 pip install -e ".[app]"
-python app_unified.py   # only Obsidian optimizer available
+python app_unified.py
 ```
 
 **EDBO+ (isolated — cannot share env with BoFire or BayBe):**
@@ -124,7 +130,7 @@ conda create -n edboplus python=3.10
 conda activate edboplus
 pip install edbo
 pip install -e ".[app]"
-python app_unified.py   # only Obsidian + EDBO+ available
+python app_unified.py
 ```
 
 ### Why EDBO+ must be isolated
