@@ -8,13 +8,16 @@ Run Bayesian Optimisation backends side-by-side and compare their convergence on
 ## Quick start
 
 ```bash
-# Install obsidian and optional backends (see Dependencies below)
-pip install -e .
+# Install obsidian with the Dash UI extras and optional backends (see Dependencies below)
+pip install -e ".[app]"
 
 # Launch the server
 python app_unified.py
 # → open http://127.0.0.1:8050
 ```
+
+> `[app]` installs `dash`, `dash-daq`, `dash-bootstrap-components`, and `pillow` — all required
+> to run the server. Omitting it leaves only the core obsidian library without a UI.
 
 ---
 
@@ -79,9 +82,9 @@ It cannot be installed in the same environment as either of those two libraries.
 ```bash
 conda create -n edboplus python=3.10
 conda activate edboplus
-pip install edbo          # installs its pinned deps
-pip install -e .          # install obsidian itself
-python app_unified.py     # only Obsidian + EDBO+ will be available
+pip install edbo             # installs its pinned deps
+pip install -e ".[app]"      # install obsidian with Dash UI
+python app_unified.py        # only Obsidian + EDBO+ will be available
 ```
 
 For the combined Obsidian + BoFire + BayBe environment (EDBO+ excluded):
@@ -89,7 +92,7 @@ For the combined Obsidian + BoFire + BayBe environment (EDBO+ excluded):
 ```bash
 conda create -n boopt python=3.11
 conda activate boopt
-pip install -e .
+pip install -e ".[app]"
 pip install bofire[optimization] baybe
 python app_unified.py
 ```
@@ -208,7 +211,7 @@ The UI picks it up automatically on the next server start.
 ```bash
 conda create -n boopt python=3.11
 conda activate boopt
-pip install -e .
+pip install -e ".[app]"
 pip install "bofire[optimization]" baybe
 ```
 
@@ -218,13 +221,13 @@ pip install "bofire[optimization]" baybe
 conda create -n edboplus python=3.10
 conda activate edboplus
 pip install edbo
-pip install -e .
+pip install -e ".[app]"
 ```
 
 ### Obsidian only (no optional backends)
 
 ```bash
-pip install -e .
+pip install -e ".[app]"
 ```
 
 ---
