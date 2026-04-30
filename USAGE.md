@@ -24,12 +24,14 @@ The app has six tabs:
 
 | Tab | What it is for |
 |---|---|
-| **Data** | Load your data and define response objectives |
+| **Data** | Load, view, and edit your experimental data |
 | **Config** | Define the parameter space and surrogate model |
-| **Optimize** | Choose a backend, fit the surrogate, and get suggestions |
+| **Optimize** | Fit the surrogate and get next-experiment suggestions |
 | **Plots** | Visualise the response surface and feature importance |
 | **Predict** | Get a prediction at any point in the space |
 | **Benchmark** | Compare optimizer backends on standard test functions |
+
+The first five tabs are the standard obsidian interface. The **Benchmark** tab is new.
 
 ---
 
@@ -37,7 +39,7 @@ The app has six tabs:
 
 ### What it shows
 
-A table of your experimental data — input parameters (X) and measured response(s) (y).
+A table of your experimental data — input parameters (X) and measured output (y).
 When you start the server for the first time a built-in example dataset is loaded:
 
 | Parameter | Type | Range |
@@ -54,33 +56,7 @@ The output column is **Yield**, simulated from a shifted parabola with 5 % noise
 
 1. Click **Upload CSV** and select a file.
 2. The first row must be a header. Column names must match your parameter names exactly.
-3. Response column(s) can be anywhere in the file — you select them below the table.
-
-### Response selection (single-objective)
-
-The **Response Selection** card beneath the table lets you pick which column is the
-optimization target.
-
-1. Choose the column from the **Data Column** dropdown.
-2. Use the **Maximize / Minimize** toggle to set the optimization direction.
-
-### Multi-objective optimization (MOO)
-
-To optimize two or more responses simultaneously:
-
-1. Set up the primary response as above.
-2. Click **Add Response** to add a second objective row. Each row has:
-   - A column dropdown — pick any numeric column from your data.
-   - A **Maximize / Minimize** toggle.
-   - A **Delete** button to remove it.
-3. Repeat for a third objective if needed.
-
-All selected response columns are automatically excluded from the input parameter cards below.
-
-> **Which backends support MOO?**
-> - **Obsidian** — full MOO support via NEHVI (noisy expected hypervolume improvement). Supports any parameter type.
-> - **BoFire** — MOO via `qNEHVIStrategy`. Continuous parameters only.
-> - **BayBe** — MOO via `ParetoObjective`. Continuous parameters only.
+3. The target column (y) must be the last column.
 
 ### Editing data
 
@@ -117,53 +93,29 @@ Leave these at defaults until you have a reason to change them.
 
 ## Optimize tab
 
-### Step 0 — Choose a backend
-
-The **Optimizer Backend** dropdown at the top of the tab selects which library does the fitting
-and suggestion. Only backends installed in your current Python environment appear.
-
-| Backend | Library | Install |
-|---|---|---|
-| Obsidian (BoTorch) | obsidian (this package) | always available |
-| BoFire (BoTorch) | bofire | `pip install "bofire[optimization]"` |
-| BayBe (BoTorch) | baybe | `pip install baybe` |
-
-If you change the backend after fitting, the app warns you to refit before suggesting.
-
 ### Step 1 — Fit the surrogate
 
-Click **Fit** to train the model on your current data.
-
-- **Obsidian** fits a Gaussian Process and reports R² and marginal log-likelihood per response.
-- **BoFire / BayBe** fit their internal surrogates and report a confirmation card (no R² exposed).
-
-For MOO (multiple responses selected in the Data tab), each response gets its own surrogate.
-The Regression Statistics card shows R² and MLL for each one individually.
+Click **Fit** to train the Gaussian Process on your current data.
+A progress indicator appears while fitting. Fit time scales roughly with N² (number of observations).
 
 ### Step 2 — Suggest next experiments
 
-Click **Optimize** to generate candidate experiments.
+1. Set **n_suggest** — how many experiments to propose in one batch (default: 1).
+2. Choose an **acquisition function**:
+   - *Expected Improvement (EI)* — balances exploration and exploitation. Good default.
+   - *Upper Confidence Bound (UCB)* — more exploratory; increase β to explore more.
+   - *Probability of Improvement (PI)* — exploits more aggressively.
+3. Click **Suggest**.
 
-The table shows the recommended parameter settings. For **Obsidian** it also shows predicted
-response values and acquisition scores. For **BoFire / BayBe** it shows parameter columns only
-(response predictions are internal to those libraries).
-
-**Acquisition function notes:**
-- For single-objective, the acquisition function set in the Config tab is used (EI, PI, UCB, …).
-- For multi-objective (2+ responses), NEHVI is used automatically regardless of the Config tab setting.
-
-Copy the suggested values into your lab notebook or process system, run the experiment,
-add the result to the Data tab, refit, and repeat.
-
-### Download
-
-Click **Download Suggested Candidates** to save the suggestions as a CSV.
+The table that appears shows the recommended parameter settings to run next.
+Copy these values into your lab notebook or process control system, measure the result,
+add it to the Data tab, refit, and repeat.
 
 ---
 
 ## Plots tab
 
-Available after fitting the surrogate (Obsidian backend only).
+Available after fitting the surrogate.
 
 ### Response surface
 
@@ -226,12 +178,13 @@ All functions are shown as **maximisation** problems (minimisation functions are
 #### 2. Select optimizers to compare
 
 A toggle switch appears for each available backend.
-Backends not installed in your current environment are **greyed out and disabled** automatically.
+Backends not installed in your current environment are **greyed out and disabled** automatically —
+they will not appear in the results.
 
 | Toggle | Backend | Available when |
 |---|---|---|
-| Obsidian (BoTorch) | obsidian's Campaign / BayesianOptimizer | Always |
-| BoFire (BoTorch) | bofire SoboStrategy | `pip install "bofire[optimization]"` |
+| Obsidian (BoTorch) | obsidian's Campaign / BayesianOptimizer | Always (it's this package) |
+| BoFire (BoTorch) | bofire SoboStrategy | `pip install bofire[optimization]` |
 | BayBe (BoTorch) | baybe BotorchRecommender | `pip install baybe` |
 | EDBO+ (BoTorch) | edbo.plus EDBOplus | Separate conda env — see README_unified.md |
 
@@ -244,6 +197,14 @@ Enable at least one optimizer before clicking Run.
 | **Initial points** | Number of random / LHS points before BO starts | 5 for 1–2D, 10 for 3D |
 | **BO iterations** | Number of BO suggestion-evaluate cycles after init | 20–30 |
 | **Random seed** | Makes results reproducible | Any integer (0 is fine) |
+
+**Effect of initial points:**
+Too few and the surrogate starts poorly calibrated. Too many and you waste budget on random sampling.
+A rule of thumb is 3–5× the number of dimensions.
+
+**Effect of BO iterations:**
+More iterations = more evaluations = closer to the optimum, but the benchmark takes longer to run.
+For `shifted_parabola` 10 iterations is plenty; for `hartmann3` use 30+.
 
 #### 4. Click Run Benchmark
 
@@ -274,7 +235,13 @@ The Y axis is the **best value found so far** at that evaluation count.
 
 - A line that rises quickly = fast convergence (good).
 - A flat line = the optimizer is not improving (stuck or exploring).
-- The **dashed grey line** is the known global optimum.
+- The **dashed grey line** is the known global optimum. The closer a line gets to it, the better.
+
+**What to look for:**
+
+- Which optimizer reaches the optimum fastest (leftmost crossing of the dashed line)?
+- Which optimizer's line is highest after the same number of evaluations?
+- Do all lines eventually converge, or does one plateau early?
 
 #### Summary table
 
@@ -285,23 +252,30 @@ The Y axis is the **best value found so far** at that evaluation count.
 | Total Evaluations | n_init + n_iterations (same for all) |
 | Gap to Optimum | `|known optimum − best found|` — lower is better |
 
+A gap of 0.00 means the optimizer found the exact optimum (or within floating-point precision).
+
 ---
 
 ### Tips for meaningful comparisons
 
 **Use the same seed** across runs when comparing — different seeds give different random
-initialization. Seed 0 is a good default.
+initialization, which changes results. Seed 0 is a good default.
 
-**Run multiple seeds and average** for a fair comparison (use the programmatic API below).
+**Run multiple seeds and average** for a fair comparison. The Benchmark tab runs one seed
+at a time; for multi-seed averaging, use the programmatic API (see below).
+
+**More init points help all optimizers equally** — they all start with the same random design
+if you set a fixed seed, so varying n_init shifts the starting point but doesn't favour one backend.
 
 **EDBO+ uses a discrete grid** internally. On continuous benchmarks it searches only pre-sampled
-candidate points (up to 1 000 for 3D), so it may underperform. This is expected behaviour.
+candidate points (up to 1 000 for 3D), so it may underperform relative to fully continuous backends.
+This is expected behaviour, not a bug.
 
 ---
 
 ## Programmatic use
 
-### Single-objective benchmark
+You can run benchmarks without the UI, which is useful for scripts, notebooks, or multi-seed averaging:
 
 ```python
 from obsidian.unified import (
@@ -319,6 +293,7 @@ results = run_comparison(
     benchmark=benchmark,
     n_init=5,
     n_iterations=25,
+    n_suggest=1,
     seed=42,
 )
 
@@ -328,43 +303,18 @@ for r in results:
     print(f"{r['optimizer']:30s}  best={best:.4f}  gap={gap:.4f}")
 ```
 
-### Multi-objective optimization (programmatic)
-
-Use the `objectives` parameter to pass multiple `(name, minimize)` pairs:
-
-```python
-import pandas as pd
-from obsidian.unified import BofireWrapper, BaybeWrapper
-
-# Example: maximize yield, minimize cost
-objectives = [("yield", False), ("cost", True)]
-
-# BoFire
-wrapper = BofireWrapper()
-wrapper.setup(param_bounds={"temp": (20, 80), "conc": (0.1, 1.0)}, objectives=objectives)
-wrapper.fit(X_train, y_train)   # y_train is a DataFrame with columns ["yield", "cost"]
-X_next = wrapper.suggest(n=3)
-
-# BayBe
-wrapper = BaybeWrapper()
-wrapper.setup(param_bounds={"temp": (20, 80), "conc": (0.1, 1.0)}, objectives=objectives)
-wrapper.fit(X_train, y_train)
-X_next = wrapper.suggest(n=3)
-```
-
 ### Multi-seed averaging
 
 ```python
 import numpy as np
-from obsidian.unified import ObsidianWrapper, BofireWrapper, get_benchmark, run_comparison
 
-benchmark = get_benchmark("hartmann3")
+seeds = range(10)
 gap_by_optimizer = {}
 
-for seed in range(10):
+for seed in seeds:
     results = run_comparison(
         optimizers=[ObsidianWrapper(), BofireWrapper()],
-        benchmark=benchmark,
+        benchmark=get_benchmark("hartmann3"),
         n_init=10,
         n_iterations=30,
         seed=seed,
@@ -383,9 +333,9 @@ for name, gaps in gap_by_optimizer.items():
 ```python
 from obsidian.unified import (
     ObsidianWrapper,         # obsidian backend
-    BofireWrapper,           # BoFire backend (SOO + MOO)
-    BaybeWrapper,            # BayBe backend (SOO + MOO)
-    EdboplusWrapper,         # EDBO+ backend (SOO only, separate env)
+    BofireWrapper,           # BoFire backend
+    BaybeWrapper,            # BayBe backend
+    EdboplusWrapper,         # EDBO+ backend (separate env)
     ALL_WRAPPERS,            # list of all four classes
     get_available_optimizers,  # returns only importable wrappers
     BENCHMARK_REGISTRY,      # dict of all test functions
@@ -411,40 +361,20 @@ from obsidian.unified import (
 
 ## Common issues
 
-### Optimizer backend dropdown shows only one option
+### "None of the selected optimizers are available"
 
-Only libraries installed in the current Python environment appear.
-Install the optional backends:
-
-```bash
-pip install "bofire[optimization]" baybe
-```
-
-Then restart the server.
-
-### "Backend changed since last fit — please re-fit the model"
-
-You switched the Optimizer Backend dropdown after clicking Fit. Click **Fit** again with the
-new backend selected, then click **Optimize**.
-
-### Fit succeeds but Optimize shows an error for MOO
-
-For multi-objective optimization with Obsidian, the acquisition function is automatically
-switched to NEHVI. If you see an error, check that:
-- All selected response columns exist in the uploaded data.
-- All response columns are numeric.
-- You have enough observations (at least 2× the number of responses is recommended).
-
-### "None of the selected optimizers are available" (Benchmark tab)
-
-The backend library is not installed. Install it or switch to the conda environment that has it.
+The backend library is not installed in the current Python environment.
+Install it (`pip install bofire[optimization]` / `pip install baybe`) or switch to
+the conda environment that has it.
 
 ### Benchmark runs but convergence plot is flat
 
-- **n_init** may be too large relative to n_iterations — reduce n_init or increase n_iterations.
-- Try `shifted_parabola` (1D) as a sanity check.
+- **n_init** may be too large relative to n_iterations — most of the budget is random sampling.
+  Reduce n_init or increase n_iterations.
+- The optimizer may be struggling with the function dimensionality. Try `shifted_parabola` (1D)
+  as a sanity check.
 
-### EDBO+ toggle is greyed out
+### EDBO+ tab toggle is greyed out
 
 EDBO+ requires an isolated conda environment (see `README_unified.md`).
 It cannot be installed alongside BoFire or BayBe.

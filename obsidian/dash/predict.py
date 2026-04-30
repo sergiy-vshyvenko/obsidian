@@ -135,7 +135,8 @@ def setup_predict_callbacks(app):
     def config_InputTemplate(clicked, opt_save, config):
         if config is None:
             return 0, None, {}
-        optimizer = load_optimizer(config, opt_save)
+        state = opt_save.get("state", opt_save) if isinstance(opt_save, dict) else opt_save
+        optimizer = load_optimizer(config, state)
         designer = ExpDesigner(optimizer.X_space, seed=0)
         df_template = designer.initialize(3, 'LHS')
         tables = [center(make_table(df_template))]
@@ -176,7 +177,8 @@ def setup_predict_callbacks(app):
     )
     def preview_X1(data, filename, opt_save, config):
         df = pd.DataFrame(data)
-        optimizer = load_optimizer(config, opt_save)
+        state = opt_save.get("state", opt_save) if isinstance(opt_save, dict) else opt_save
+        optimizer = load_optimizer(config, state)
         preds = optimizer.predict(df)
         df_output = pd.concat([df.reset_index(drop=True), preds.reset_index(drop=True)], axis=1)
         return make_table(df_output, fill_width=True), filename

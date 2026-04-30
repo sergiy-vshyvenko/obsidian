@@ -16,16 +16,7 @@ from obsidian.unified.optimizer_wrappers import get_available_optimizers
 
 
 # Server-side wrapper cache (single-user local app)
-_active_wrapper: dict = {"instance": None}
-
-
-def _get_responses(config):
-    """Return [{name, aim}] from config, with fallback to legacy response_name key."""
-    responses = config.get('responses') if config else None
-    if responses:
-        return responses
-    name = config.get('response_name') if config else None
-    return [{'name': name, 'aim': 'max'}] if name else []
+_active_wrapper = {"instance": None}
 
 
 def setup_optimize(app, app_tabs):
@@ -85,10 +76,8 @@ def setup_optimize(app, app_tabs):
 
     storage_fit = dcc.Store(id='store-fit', data=None)
 
-    # candidates store
     store_candidates = dcc.Store(id='store-candidates', data={})
 
-    # Suggested candidates download
     candidates_downloader = html.Div(children=[
         dbc.Button('Download Suggested Candidates', id='button-download_candidates',
                    className='me-2', color='primary'),
@@ -121,12 +110,11 @@ def setup_optimize_callbacks(app):
             return 0, None
 
         backend = backend or "obsidian"
-        responses = _get_responses(config)
 
         if backend == "obsidian":
             X_space = ParamSpace.load_state(Xspace_save)
-            targets = [Target(r['name'], aim=r['aim']) for r in responses]
-            campaign = Campaign(X_space, targets if len(targets) > 1 else targets[0])
+            target = Target(config['response_name'], aim='max')
+            campaign = Campaign(X_space, target)
             campaign.add_data(pd.DataFrame(X0))
             optimizer = BayesianOptimizer(X_space=campaign.X_space,
                                           surrogate=config['surrogate_params']['surrogate'])
@@ -134,7 +122,7 @@ def setup_optimize_callbacks(app):
             campaign.fit()
             return 0, {"backend": "obsidian", "state": campaign.optimizer.save_state()}
 
-        # Unified wrapper path (bofire, baybe, …)
+        # BoFire / BayBe path
         X_space = ParamSpace.load_state(Xspace_save)
         param_bounds = {
             p.name: (p.min, p.max)
@@ -147,19 +135,19 @@ def setup_optimize_callbacks(app):
         if WrapperClass is None:
             return 0, None
 
-        objectives = [(r['name'], r['aim'] == 'min') for r in responses]
+        response_name = config['response_name']
         wrapper = WrapperClass()
-        wrapper.setup(param_bounds, objectives=objectives)
+        wrapper.setup(param_bounds, minimize=False)
 
         df = pd.DataFrame(X0)
-        response_names = [r['name'] for r in responses]
         X = df[list(param_bounds.keys())]
-        y = df[response_names] if len(response_names) > 1 else df[response_names[0]]
+        y = df[response_name]
         wrapper.fit(X, y)
 
         _active_wrapper["instance"] = wrapper
-        return 0, {"backend": backend, "fitted": True, "param_names": list(param_bounds.keys()),
-                   "response_names": response_names}
+        return 0, {"backend": backend, "fitted": True,
+                   "param_names": list(param_bounds.keys()),
+                   "response_name": response_name}
 
     @app.callback(
         Output('div-fit', 'children'),
@@ -174,26 +162,20 @@ def setup_optimize_callbacks(app):
         backend = opt_save.get("backend", "obsidian") if isinstance(opt_save, dict) else "obsidian"
 
         if backend == "obsidian":
-            optimizer = load_optimizer(config, opt_save["state"])
-            responses = _get_responses(config)
-            items = [
+            state = opt_save["state"] if isinstance(opt_save, dict) else opt_save
+            optimizer = load_optimizer(config, state)
+            return dbc.ListGroup([
                 dbc.ListGroupItem(['Model Type: ', f'{optimizer.surrogate_type}']),
                 dbc.ListGroupItem(['Data Name: ', filename]),
-            ]
-            for i, surr in enumerate(optimizer.surrogate):
-                label = responses[i]['name'] if i < len(responses) else f'Response {i + 1}'
-                items += [
-                    dbc.ListGroupItem([f'{label} R', html.Sup('2'), ': ', f'{surr.r2_score:.4g}']),
-                    dbc.ListGroupItem([f'{label} MLL: ', f'{surr.loss:.4g}']),
-                ]
-            return dbc.ListGroup(items, flush=True)
+                dbc.ListGroupItem(['R', html.Sup('2'), ' Score: ', f'{optimizer.surrogate[0].r2_score:.4g}']),
+                dbc.ListGroupItem(['Marginal Log Likelihood: ', f'{optimizer.surrogate[0].loss:.4g}']),
+            ], flush=True)
 
         backend_labels = {"bofire": "BoFire (BoTorch)", "baybe": "BayBe (BoTorch)"}
-        response_names = opt_save.get("response_names", [])
         return dbc.ListGroup([
             dbc.ListGroupItem(['Backend: ', backend_labels.get(backend, backend)]),
             dbc.ListGroupItem(['Data Name: ', filename]),
-            dbc.ListGroupItem(['Responses: ', ', '.join(response_names)]),
+            dbc.ListGroupItem(['Response: ', opt_save.get("response_name", "")]),
             dbc.ListGroupItem('Surrogate fitted successfully'),
         ], flush=True)
 
@@ -204,7 +186,6 @@ def setup_optimize_callbacks(app):
         prevent_initial_call=True
     )
     def graph_parity_plot(opt_save, config):
-
         if opt_save is None:
             return None
 
@@ -212,13 +193,11 @@ def setup_optimize_callbacks(app):
         if backend != "obsidian":
             return None
 
-        optimizer = load_optimizer(config, opt_save["state"])
+        state = opt_save["state"] if isinstance(opt_save, dict) else opt_save
+        optimizer = load_optimizer(config, state)
         pplot = parity_plot(optimizer)
         pplot.update_layout(height=400, width=600)
-
-        graph = dcc.Graph(figure=pplot)
-
-        return center(graph)
+        return center(dcc.Graph(figure=pplot))
 
     @app.callback(
         Output('div-predict', 'children'),
@@ -246,18 +225,14 @@ def setup_optimize_callbacks(app):
             )
 
         if backend == "obsidian":
-            responses = _get_responses(config)
-            optimizer = load_optimizer(config, opt_save["state"])
-            aq_params = dict(config['aq_params'])
-            if len(responses) > 1:
-                aq_params['acquisition'] = ['NEHVI']
-            X_suggest, eval_suggest = optimizer.suggest(**aq_params)
+            state = opt_save["state"] if isinstance(opt_save, dict) else opt_save
+            optimizer = load_optimizer(config, state)
+            X_suggest, eval_suggest = optimizer.suggest(**config['aq_params'])
             df_suggest = pd.concat([X_suggest, eval_suggest], axis=1)
             df_suggest.insert(loc=0, column='CandidatesID', value=df_suggest.index)
             tables = [center(make_table(df_suggest))]
             return tables, {'overflow-x': 'scroll'}, 0, df_suggest.to_dict()
 
-        # Unified wrapper path
         wrapper = _active_wrapper.get("instance")
         if wrapper is None:
             return dbc.Alert('No fitted model found — please re-fit', color='danger'), {}, 0, {}

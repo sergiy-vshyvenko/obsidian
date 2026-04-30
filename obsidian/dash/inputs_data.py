@@ -10,48 +10,8 @@ from obsidian.parameters import ParamSpace, Param_Categorical, Param_Ordinal, Pa
 from pandas.api.types import is_numeric_dtype
 
 
-def _make_extra_response_row(index, columns):
-    """One deletable response row for objectives 2, 3, …"""
-    col_options = [{"label": c, "value": c} for c in columns]
-    return dbc.Row(
-        id={"type": "div-response_row", "index": index},
-        children=[
-            dbc.Col(
-                dcc.Dropdown(
-                    id={"type": "input-response_col", "index": index},
-                    options=col_options,
-                    value=None,
-                    clearable=True,
-                    placeholder="Select response column…",
-                ),
-                width=6,
-            ),
-            dbc.Col(
-                dbc.Switch(
-                    id={"type": "toggle-response_aim", "index": index},
-                    label="Maximize",
-                    value=True,
-                ),
-                width=4,
-            ),
-            dbc.Col(
-                dbc.Button(
-                    "Delete",
-                    id={"type": "button-response_delete", "index": index},
-                    color="danger",
-                    size="sm",
-                    n_clicks=0,
-                ),
-                width=2,
-            ),
-        ],
-        align="center",
-        className="mb-2",
-    )
-
-
 def setup_data(app, app_tabs, default_data, default_Xspace):
-
+    
     # Data upload
     uploader = dcc.Upload(id='uploader-X0',
                           children=html.Div(['Upload Data: Drag and Drop or ',
@@ -65,13 +25,13 @@ def setup_data(app, app_tabs, default_data, default_Xspace):
                           multiple=False,
                           filename='Example Data'
                           )
-
+    
     # Example data download
     template_downloader = html.Div(children=[dbc.Button('Download Template Data', id='button-download_data',
                                                         className='me-2', color='primary'),
                                              dcc.Download(id='downloader-X0_template')],
                                    style={'textAlign': 'center'})
-
+    
     # Data preview
     preview = html.Div(id='table-X0', children=dbc.Card(
         [dbc.CardHeader('Input Data'),
@@ -87,112 +47,51 @@ def setup_data(app, app_tabs, default_data, default_Xspace):
              ],
              style={'textAlign': 'center'}))
          ]))
-
+    
     preview_uploader = dbc.Row([dbc.Col([uploader, template_downloader], width=4),
                                 dbc.Col(preview, width=8)],
                                style={'margin-top': '15px'})
-
+    
     # Data store
     storage_X0 = dcc.Store(id='store-X0', data=default_data.to_dict())
     storage_X0_template = dcc.Store(id='store-X0_template', data=default_data.to_dict())
     storage_Xspace = dcc.Store(id='store-Xspace', data=default_Xspace.save_state())
-
-    # Responses store – list of {name, aim} dicts
-    default_response_col = default_data.columns[-1]
-    storage_responses = dcc.Store(
-        id='store-responses',
-        data=[{"name": default_response_col, "aim": "max"}],
-    )
-
+    
     # Parameter space table
     xspace = html.Div([html.Div(id='div-xspace', children=[])])
 
-    # ── Response configuration card ─────────────────────────────────────────
-    # Primary response row (always present)
-    primary_response_row = dbc.Row(
-        [
-            dbc.Col(
-                make_dropdown(
-                    "Data Column",
-                    "Select column for the primary response",
-                    default_data.columns,
-                    id="input-response_name",
-                    kwargs={"value": default_response_col},
-                ),
-                width=6,
-            ),
-            dbc.Col(
-                [
-                    dbc.Label("Aim", style={"font-weight": "bold", "font-size": "0.8em"}),
-                    html.Div(
-                        dbc.Switch(
-                            id="toggle-response_aim_primary",
-                            label="Maximize",
-                            value=True,
-                        )
-                    ),
-                    dbc.FormText("Optimize this response upward (on) or downward (off)",
-                                 style={"font-size": "0.7em"}),
-                ],
-                width=4,
-            ),
-        ],
-        align="center",
-    )
-
-    # Container for extra response rows (added dynamically)
-    extra_responses_div = html.Div(id="div-extra-responses", children=[])
-
-    ycol = dbc.Row(
-        dbc.Col(
-            dbc.Card([
-                dbc.CardHeader([
-                    html.I(id="info-response_col", className="bi bi-info-circle-fill me-2"),
-                    dbc.Tooltip(
-                        "Select one or more response columns to optimize. "
-                        "Use 'Add Response' for multi-objective optimization.",
-                        target="info-response_col",
-                        placement="top",
-                        style={"text-transform": "none"},
-                    ),
-                    "Response Selection",
-                ]),
-                dbc.CardBody([
-                    primary_response_row,
-                    html.Div(id="div-response_name"),   # kept for legacy callback compat
-                    html.Hr(id="hr-extra-responses", style={"display": "none"}),
-                    extra_responses_div,
-                ]),
-                dbc.CardFooter(
-                    dbc.Button(
-                        "Add Response",
-                        id="button-response_add",
-                        color="secondary",
-                        size="sm",
-                        n_clicks=0,
-                    )
-                ),
-            ]),
-            width=6,
-        ),
-        justify="center",
-    )
-    # ────────────────────────────────────────────────────────────────────────
-
+    # Selecting the response variable
+    ycol = dbc.Row(dbc.Col(dbc.Card([dbc.CardHeader([html.I(id='info-response_col',
+                                                            className='bi bi-info-circle-fill me-2'),
+                                                     dbc.Tooltip('The response is the variable which is\
+                                                                 chosen for optimization (e.g. yield, productivity);\
+                                                                 it is the target of the objective function before\
+                                                                 including optional transformations.',
+                                                                 target='info-response_col', placement='top',
+                                                                 style={'text-transform': 'none'}),
+                                                     'Response Selection']),
+                   dbc.CardBody(html.Div(id='div-response_name',
+                                         children=[make_dropdown('Data Column',
+                                                                 'Select column for response',
+                                                                 default_data.columns,
+                                                                 id='input-response_name',
+                                                                 kwargs={'value': default_data.columns[-1]})]))
+                    ]), width=4), justify='center')
+    
     # Extra div for printing outputs, for troubleshooting
     troubleshoot = html.Div(id='debug-print-data')
-
-    elements = [html.Br(), preview_uploader, html.Hr(), ycol, xspace,
-                storage_X0, storage_X0_template, storage_Xspace, storage_responses,
-                html.Hr(), troubleshoot]
+    
+    # Add all of these elements to the app
+    elements = [html.Br(), preview_uploader, html.Hr(), ycol, xspace, storage_X0,
+                storage_X0_template, storage_Xspace, html.Hr(), troubleshoot]
     add_tab(app_tabs, elements, 'tab-data', 'Data')
     setup_data_callbacks(app)
-
+    
     return
 
 
 def setup_data_callbacks(app):
-
+    
     # Save the uploaded data into the data-store
     @app.callback(
         Output('store-X0', 'data'),
@@ -205,7 +104,7 @@ def setup_data_callbacks(app):
         decoded = base64.b64decode(content_string)
         df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
         return df.to_dict()
-
+    
     # View the uploaded data in a Data Table
     @app.callback(
         Output('table-X0-body', 'children'),
@@ -216,19 +115,19 @@ def setup_data_callbacks(app):
     def preview_X0(data, filename):
         df = pd.DataFrame(data)
         return make_table(df, fill_width=True), filename
-
+    
     # Download template data
     @app.callback(
         Output('downloader-X0_template', 'data'),
         Input('button-download_data', 'n_clicks'),
         State('store-X0_template', 'data'),
-        prevent_initial_call=True
+        prevent_initial_call=True  # otherwise, the download CSV appears right away
     )
     def download_X0_template(n_clicks, data):
         df = pd.DataFrame(data)
         return dcc.send_data_frame(df.to_csv, 'Example_Data.csv', index=False)
-
-    # Update primary response dropdown options when new data is loaded
+    
+    # Select a response variable
     @app.callback(
         Output('input-response_name', 'options'),
         Output('input-response_name', 'value'),
@@ -237,69 +136,23 @@ def setup_data_callbacks(app):
     def choose_col(data):
         df = pd.DataFrame(data)
         return df.columns, df.columns[-1]
-
-    # Add an extra response row
-    @app.callback(
-        Output('div-extra-responses', 'children'),
-        Output('hr-extra-responses', 'style'),
-        Output('button-response_add', 'n_clicks'),
-        Input('button-response_add', 'n_clicks'),
-        State('div-extra-responses', 'children'),
-        State('store-X0', 'data'),
-    )
-    def add_response_row(n_clicks, current_rows, data):
-        if not n_clicks:
-            raise PreventUpdate
-        df = pd.DataFrame(data)
-        idx = len(current_rows) + 1   # 0 = primary; extras start at 1
-        new_row = _make_extra_response_row(idx, list(df.columns))
-        updated = list(current_rows) + [new_row]
-        return updated, {}, 0   # show the <hr> once extras exist
-
-    # Delete an extra response row
-    @app.callback(
-        Output({"type": "div-response_row", "index": MATCH}, "children"),
-        Output({"type": "button-response_delete", "index": MATCH}, "n_clicks"),
-        Input({"type": "button-response_delete", "index": MATCH}, "n_clicks"),
-        prevent_initial_call=True,
-    )
-    def delete_response_row(n_clicks, _children):
-        return None, 0
-
-    # Collect all responses into store-responses
-    @app.callback(
-        Output('store-responses', 'data'),
-        Input('input-response_name', 'value'),
-        Input('toggle-response_aim_primary', 'value'),
-        Input({"type": "input-response_col", "index": ALL}, 'value'),
-        Input({"type": "toggle-response_aim", "index": ALL}, 'value'),
-    )
-    def collect_responses(primary_name, primary_maximize, extra_names, extra_aims):
-        responses = []
-        if primary_name:
-            responses.append({"name": primary_name, "aim": "max" if primary_maximize else "min"})
-        for name, maximize in zip(extra_names, extra_aims):
-            if name is not None:
-                responses.append({"name": name, "aim": "max" if maximize else "min"})
-        return responses
-
-    # Build parameter type cards, excluding all selected response columns
+            
+    # Select types for each input variable
     @app.callback(
         Output('div-xspace', 'children'),
         Input('store-X0', 'data'),
-        Input('store-responses', 'data'),
+        Input('input-response_name', 'value'),
         State('store-Xspace', 'data')
     )
-    def update_xspace_types(data, responses, Xspace_save):
-
+    def update_xspace_types(data, ycol, Xspace_save):
+        
         X_space = ParamSpace.load_state(Xspace_save)
-
+        
         df_X0 = pd.DataFrame(data)
-        ycols = {r['name'] for r in (responses or [])}
-        xcols = [x for x in df_X0.columns if x not in ycols]
-
+        xcols = [x for x in df_X0.columns if x != ycol]
+        
         param_types = ['Numeric', 'Categorical', 'Ordinal']
-
+        
         cols = []
         for i, x in enumerate(xcols):
             if x in X_space.X_names:
@@ -312,34 +165,40 @@ def setup_data_callbacks(app):
                 elif isinstance(param, Param_Ordinal):
                     param_type = 'Ordinal'
             else:
-                param_type = 'Categorical' if not is_numeric_dtype(df_X0[x]) else 'Numeric'
-
+                if not is_numeric_dtype(df_X0[x]):
+                    param_type = 'Categorical'
+                else:
+                    param_type = 'Numeric'
+            
             cols.append(dbc.Col(children=dbc.Card([
                 dbc.CardHeader(f'{x}'),
                 dbc.CardBody([make_dropdown('Type', f'Select parameter type for {x}', param_types,
                                             id={'type': 'input-param_type', 'index': x},
                                             kwargs={'value': param_type}),
                               html.Div(id={'type': 'div-param_vals', 'index': x}, children=[]),
-                              dcc.Store(id={'type': 'store-param_save', 'index': x}, data={})])
+                              dcc.Store(id={'type': 'store-param_save', 'index': x}, data={})],)
                 ],
                 color='primary', outline=True), width=2))
-
-        return dbc.Container(dbc.Row(cols, style={'margin-top': '15px'}, justify='center'), fluid=True)
-
+ 
+        return dbc.Container(dbc.Row(cols, style={'margin-top': '15px'},
+                                     justify='center'),
+                             fluid=True)
+    
     # Select min, max, and/or categories for each input variable
     @app.callback(
         Output({'type': 'div-param_vals', 'index': MATCH}, 'children'),
         Input({'type': 'input-param_type', 'index': MATCH}, 'value'),
         State({'type': 'input-param_type', 'index': MATCH}, 'id'),
         State('store-X0', 'data'),
-        prevent_initial_call=True
+        State('input-response_name', 'value')
     )
-    def update_xspace_vals(param_type, param_id, data):
-
+    def update_xspace_vals(param_type, param_id, data, ycol):
+        
         df = pd.DataFrame(data)
         x = param_id['index']
         ser_x = df[x]
-
+        
+        # All keys must be present, so Numeric still needs "None" categories, etc.
         if param_type == 'Numeric':
             choices = [
                 make_input(f'{x} Min Value', f'Select optimization minimum for {x}', df[x].min(),
@@ -348,7 +207,7 @@ def setup_data_callbacks(app):
                            id={'type': 'input-param_max', 'index': x}),
                 dcc.Store(id={'type': 'store-param_categories', 'index': x}, data=None)
                 ]
-
+                           
         elif param_type in ['Categorical', 'Ordinal']:
             choices = [dbc.Card(dbc.CardBody([
                        dbc.InputGroup([dbc.Input(id={'type': 'input-new_category', 'index': x},
@@ -374,12 +233,12 @@ def setup_data_callbacks(app):
         Input({'type': 'input-param_min', 'index': MATCH}, 'value'),
         Input({'type': 'input-param_max', 'index': MATCH}, 'value'),
         Input({'type': 'store-param_categories', 'index': MATCH}, 'data'),
-        prevent_initial_call=True
+        prevent_initial_call=True  # It takes a second for these input matches to show up
     )
     def update_param_save(param_id, param_type, param_min, param_max, param_cat):
-
+        
         name = param_id['index']
-
+        
         try:
             if param_type == 'Numeric':
                 param = Param_Continuous(name, param_min, param_max)
@@ -387,13 +246,13 @@ def setup_data_callbacks(app):
                 param = Param_Categorical(name, param_cat)
             elif param_type == 'Ordinal':
                 param = Param_Ordinal(name, param_cat)
-
+        
             single_param = ParamSpace([param])
             return single_param.save_state()
-
+        
         except TypeError:
             return None
-
+    
     # Category management for categorical variables
     @app.callback(
         Output({'type': 'store-param_categories', 'index': MATCH}, 'data'),
@@ -409,23 +268,23 @@ def setup_data_callbacks(app):
         prevent_initial_call=True
     )
     def cat_buttons(add_button, clear_button, current_cats, new_cat, param_id, data):
-
+        
         x = param_id['index']
         df = pd.DataFrame(data)
         ser_x = df[x]
-
+        
         if clear_button:
             return ', '.join(list(ser_x.sort_values().astype('str').unique())), '', 0, 0
-
+        
         if add_button:
             if new_cat != '':
                 if current_cats is None:
                     current_cats = new_cat
                 else:
                     if new_cat not in current_cats:
-                        current_cats += ', ' + new_cat
+                        current_cats += ', '+new_cat
             return current_cats, '', 0, 0
-
+    
     # Preview categories for categorical variables
     @app.callback(
         Output({'type': 'div-param_categories', 'index': MATCH}, 'children'),
@@ -434,8 +293,13 @@ def setup_data_callbacks(app):
     def preview_cats(current_cats):
         if current_cats is None:
             return None
-        cat_list = current_cats.split(', ')
-        return [html.Div(cat, style={'font-size': '0.8em'}) for cat in cat_list]
+        else:
+            cat_list = current_cats.split(', ')
+            
+            preview = []
+            for cat in cat_list:
+                preview += [html.Div(cat, style={'font-size': '0.8em'})]
+            return preview
 
     @app.callback(
         Output('debug-print-data', 'children'),
@@ -443,22 +307,22 @@ def setup_data_callbacks(app):
     )
     def troubleshoot_config(data):
         return
-
+    
     @app.callback(
         Output('store-Xspace', 'data'),
         Input({'type': 'store-param_save', 'index': ALL}, 'data'),
         prevent_initial_call=True
     )
     def save_Xspace(param_saves):
-
+        
         param_list = []
         for param_input in param_saves:
             if param_input:
                 param_i = ParamSpace.load_state(param_input)
                 param_list += list(param_i.params)
-
+                
         X_space = ParamSpace(param_list)
-
+        
         return X_space.save_state()
-
+    
     return

@@ -1,16 +1,10 @@
 """Unified multi-optimizer APO server.
 
-Extends the standard obsidian Dash app with a **Benchmark** tab that lets
-you compare Obsidian, BoFire, BayBe, and EDBO+ on standard BO test
-functions side-by-side.
-
 Run::
 
     python app_unified.py
 
 The server starts on http://127.0.0.1:8050 by default.
-All original obsidian tabs (Data, Config, Optimize, Plots, Predict) are
-preserved unchanged.  The new Benchmark tab is appended at the end.
 """
 
 import pandas as pd
@@ -26,7 +20,6 @@ from obsidian.dash import (
     setup_predict,
     setup_infobar,
 )
-from obsidian.unified.dash_benchmark import setup_benchmark
 
 from obsidian.parameters import (
     ParamSpace,
@@ -105,12 +98,11 @@ default_data = pd.concat([X0, y0], axis=1)
 # ---------------------------------------------------------------------------
 
 setup_infobar(app, app_infobar)
-setup_data(app, app_tabs, default_data, X_space)   # existing obsidian tabs
+setup_data(app, app_tabs, default_data, X_space)
 setup_config(app, app_tabs)
 setup_optimize(app, app_tabs)
 setup_plots(app, app_tabs)
 setup_predict(app, app_tabs)
-setup_benchmark(app, app_tabs)                     # new benchmark tab
 
 
 # ---------------------------------------------------------------------------
@@ -118,4 +110,4 @@ setup_benchmark(app, app_tabs)                     # new benchmark tab
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    app.run_server(debug=True)
+    app.run(debug=True)
