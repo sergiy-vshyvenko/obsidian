@@ -1,15 +1,23 @@
-"""Optimizer wrapper adapters for unified benchmarking interface.
+"""Optimizer wrapper adapters for unified interface.
 
 Each wrapper adapts an optimizer backend to a common interface::
 
-    setup(param_bounds, minimize)  ->  None
-    initialize(n_init, seed)       ->  pd.DataFrame
-    fit(X, y)                      ->  None
-    suggest(n)                     ->  pd.DataFrame
-    is_available()                 ->  bool
+    setup(param_bounds, param_categories, objectives, minimize)  ->  None
+    initialize(n_init, seed)                                      ->  pd.DataFrame
+    fit(X, y)                                                     ->  None
+    suggest(n)                                                    ->  pd.DataFrame
+    is_available()                                                ->  bool
 
-All wrappers are purely stateful objects; create a new instance per benchmark
-run to avoid state leaking between experiments.
+Parameters
+----------
+param_bounds : dict {name: (min, max)}
+    Continuous parameters.
+param_categories : dict {name: [cat1, cat2, ...]}, optional
+    Categorical / ordinal parameters.
+objectives : list of (name, minimize) tuples, optional
+    Multi-objective targets.  Pass None + minimize=bool for single-objective.
+minimize : bool
+    Used only when objectives is None (backward compat with benchmark runner).
 """
 from __future__ import annotations
 
@@ -20,6 +28,14 @@ import numpy as np
 import pandas as pd
 
 ParamBounds = Dict[str, Tuple[float, float]]
+ParamCategories = Dict[str, List[str]]
+Objectives = List[Tuple[str, bool]]   # [(name, minimize), ...]
+
+
+def _resolve_objectives(objectives: Optional[Objectives], minimize: bool, y_name: str = "y") -> Objectives:
+    if objectives is not None:
+        return objectives
+    return [(y_name, minimize)]
 
 
 class BaseOptimizerWrapper(ABC):
@@ -29,20 +45,26 @@ class BaseOptimizerWrapper(ABC):
     label: str = "Base"
 
     @abstractmethod
-    def setup(self, param_bounds: ParamBounds, minimize: bool = False) -> None:
-        """Configure the optimizer with the parameter space."""
+    def setup(
+        self,
+        param_bounds: ParamBounds,
+        param_categories: Optional[ParamCategories] = None,
+        objectives: Optional[Objectives] = None,
+        minimize: bool = False,
+    ) -> None:
+        """Configure the optimizer with the parameter space and objectives."""
 
     @abstractmethod
     def initialize(self, n_init: int, seed: int = 0) -> pd.DataFrame:
-        """Generate initial DoE points. Returns DataFrame with param_bounds keys."""
+        """Generate initial DoE points."""
 
     @abstractmethod
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> None:
-        """Fit the surrogate model to observed data."""
+    def fit(self, X: pd.DataFrame, y: pd.DataFrame | pd.Series) -> None:
+        """Fit the surrogate model. y may be a Series (SOO) or DataFrame (MOO)."""
 
     @abstractmethod
     def suggest(self, n: int = 1) -> Optional[pd.DataFrame]:
-        """Suggest next experiment(s). Returns DataFrame with param_bounds keys."""
+        """Suggest next experiment(s)."""
 
     @staticmethod
     @abstractmethod
@@ -60,25 +82,36 @@ class ObsidianWrapper(BaseOptimizerWrapper):
     name = "obsidian"
     label = "Obsidian (BoTorch)"
 
-    def setup(self, param_bounds: ParamBounds, minimize: bool = False) -> None:
-        from obsidian.parameters import ParamSpace, Param_Continuous, Target
+    def setup(
+        self,
+        param_bounds: ParamBounds,
+        param_categories: Optional[ParamCategories] = None,
+        objectives: Optional[Objectives] = None,
+        minimize: bool = False,
+    ) -> None:
+        from obsidian.parameters import ParamSpace, Param_Continuous, Param_Categorical, Target
         from obsidian.campaign import Campaign
 
+        self._objectives = _resolve_objectives(objectives, minimize)
         params = [Param_Continuous(k, v[0], v[1]) for k, v in param_bounds.items()]
+        for k, cats in (param_categories or {}).items():
+            params.append(Param_Categorical(k, cats))
         self._X_space = ParamSpace(params)
-        self._target_name = "y"
-        self._minimize = minimize
-        target = Target(self._target_name, aim="min" if minimize else "max")
-        self._campaign = Campaign(self._X_space, target)
+        targets = [Target(name, aim="min" if min_ else "max") for name, min_ in self._objectives]
+        self._campaign = Campaign(self._X_space, targets if len(targets) > 1 else targets[0])
 
     def initialize(self, n_init: int, seed: int = 0) -> pd.DataFrame:
         from obsidian.experiment import ExpDesigner
         designer = ExpDesigner(self._X_space, seed=seed)
         return designer.initialize(n_init, "LHS")
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> None:
+    def fit(self, X: pd.DataFrame, y: pd.DataFrame | pd.Series) -> None:
         df = X.copy()
-        df[self._target_name] = y.values
+        if isinstance(y, pd.DataFrame):
+            for col in y.columns:
+                df[col] = y[col].values
+        else:
+            df[self._objectives[0][0]] = y.values
         self._campaign.clear_data()
         self._campaign.add_data(df)
         self._campaign.fit()
@@ -104,26 +137,48 @@ class ObsidianWrapper(BaseOptimizerWrapper):
 # ---------------------------------------------------------------------------
 
 class BofireWrapper(BaseOptimizerWrapper):
-    """Wrapper for BoFire's SoboStrategy (single-objective BO)."""
+    """Wrapper for BoFire (single- and multi-objective BO).
+
+    Supports continuous and categorical parameters.
+    Single-objective uses SoboStrategy; multi-objective uses qNEHVIStrategy.
+    """
 
     name = "bofire"
     label = "BoFire (BoTorch)"
 
-    def setup(self, param_bounds: ParamBounds, minimize: bool = False) -> None:
+    def setup(
+        self,
+        param_bounds: ParamBounds,
+        param_categories: Optional[ParamCategories] = None,
+        objectives: Optional[Objectives] = None,
+        minimize: bool = False,
+    ) -> None:
         from bofire.data_models.domain.api import Domain, Inputs, Outputs
-        from bofire.data_models.features.api import ContinuousInput, ContinuousOutput
+        from bofire.data_models.features.api import (
+            ContinuousInput, CategoricalInput, ContinuousOutput,
+        )
         from bofire.data_models.objectives.api import MaximizeObjective, MinimizeObjective
 
-        inputs = Inputs(features=[
+        self._objectives = _resolve_objectives(objectives, minimize)
+        self._param_names = list(param_bounds.keys()) + list((param_categories or {}).keys())
+        self._experiments: Optional[pd.DataFrame] = None
+
+        input_features = [
             ContinuousInput(key=k, bounds=(float(v[0]), float(v[1])))
             for k, v in param_bounds.items()
-        ])
-        obj = MinimizeObjective(w=1) if minimize else MaximizeObjective(w=1)
-        outputs = Outputs(features=[ContinuousOutput(key="y", objective=obj)])
-        self._domain = Domain(inputs=inputs, outputs=outputs)
-        self._param_names = list(param_bounds.keys())
-        self._minimize = minimize
-        self._experiments: Optional[pd.DataFrame] = None
+        ]
+        for k, cats in (param_categories or {}).items():
+            input_features.append(CategoricalInput(key=k, categories=list(cats)))
+
+        output_features = []
+        for name, min_ in self._objectives:
+            obj = MinimizeObjective(w=1) if min_ else MaximizeObjective(w=1)
+            output_features.append(ContinuousOutput(key=name, objective=obj))
+
+        self._domain = Domain(
+            inputs=Inputs(features=input_features),
+            outputs=Outputs(features=output_features),
+        )
 
     def initialize(self, n_init: int, seed: int = 0) -> pd.DataFrame:
         from bofire.data_models.strategies.api import RandomStrategy as RandomDM
@@ -134,20 +189,33 @@ class BofireWrapper(BaseOptimizerWrapper):
         candidates = strategy.ask(n_init)
         return candidates[self._param_names].reset_index(drop=True)
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> None:
+    def fit(self, X: pd.DataFrame, y: pd.DataFrame | pd.Series) -> None:
         df = X[self._param_names].copy()
-        df["y"] = y.values
-        df["valid_y"] = 1
+        if isinstance(y, pd.DataFrame):
+            for col in y.columns:
+                df[col] = y[col].values
+                df[f"valid_{col}"] = 1
+        else:
+            name = self._objectives[0][0]
+            df[name] = y.values
+            df[f"valid_{name}"] = 1
         self._experiments = df
 
     def suggest(self, n: int = 1) -> Optional[pd.DataFrame]:
-        from bofire.data_models.strategies.api import SoboStrategy as SoboDM
-        from bofire.strategies.api import SoboStrategy
-
         if self._experiments is None:
             return None
-        dm = SoboDM(domain=self._domain)
-        strategy = SoboStrategy(data_model=dm)
+
+        if len(self._objectives) > 1:
+            from bofire.data_models.strategies.api import MoboStrategy as MoboDM
+            from bofire.strategies.api import MoboStrategy
+            dm = MoboDM(domain=self._domain)
+            strategy = MoboStrategy(data_model=dm)
+        else:
+            from bofire.data_models.strategies.api import SoboStrategy as SoboDM
+            from bofire.strategies.predictives.sobo import SoboStrategy
+            dm = SoboDM(domain=self._domain)
+            strategy = SoboStrategy(data_model=dm)
+
         strategy.tell(self._experiments)
         candidates = strategy.ask(n)
         return candidates[self._param_names].reset_index(drop=True)
@@ -166,22 +234,33 @@ class BofireWrapper(BaseOptimizerWrapper):
 # ---------------------------------------------------------------------------
 
 class BaybeWrapper(BaseOptimizerWrapper):
-    """Wrapper for BayBe's BotorchRecommender (stateless recommend API)."""
+    """Wrapper for BayBe (single- and multi-objective BO).
+
+    Supports continuous and categorical parameters.
+    Single-objective uses NumericalTarget; multi-objective uses ParetoObjective.
+    """
 
     name = "baybe"
     label = "BayBe (BoTorch)"
 
-    def setup(self, param_bounds: ParamBounds, minimize: bool = False) -> None:
+    def setup(
+        self,
+        param_bounds: ParamBounds,
+        param_categories: Optional[ParamCategories] = None,
+        objectives: Optional[Objectives] = None,
+        minimize: bool = False,
+    ) -> None:
+        self._objectives = _resolve_objectives(objectives, minimize)
         self._param_bounds = param_bounds
-        self._param_names = list(param_bounds.keys())
-        self._minimize = minimize
+        self._param_categories = param_categories or {}
+        self._param_names = list(param_bounds.keys()) + list(self._param_categories.keys())
         self._measurements: Optional[pd.DataFrame] = None
         self._searchspace = None
         self._objective = None
         self._recommender = None
 
     def _build_objects(self) -> None:
-        from baybe.parameters import NumericalContinuousParameter
+        from baybe.parameters import NumericalContinuousParameter, CategoricalParameter
         from baybe.recommenders import BotorchRecommender
         from baybe.searchspace import SearchSpace
         from baybe.targets import NumericalTarget
@@ -190,8 +269,18 @@ class BaybeWrapper(BaseOptimizerWrapper):
             NumericalContinuousParameter(name=k, bounds=(float(v[0]), float(v[1])))
             for k, v in self._param_bounds.items()
         ]
+        for k, cats in self._param_categories.items():
+            params.append(CategoricalParameter(name=k, values=list(cats)))
+
         self._searchspace = SearchSpace.from_product(parameters=params)
-        self._objective = NumericalTarget(name="y", minimize=self._minimize).to_objective()
+
+        targets = [NumericalTarget(name=name, minimize=min_) for name, min_ in self._objectives]
+        if len(targets) == 1:
+            self._objective = targets[0].to_objective()
+        else:
+            from baybe.objectives import ParetoObjective
+            self._objective = ParetoObjective(targets=targets)
+
         self._recommender = BotorchRecommender()
 
     def initialize(self, n_init: int, seed: int = 0) -> pd.DataFrame:
@@ -202,11 +291,21 @@ class BaybeWrapper(BaseOptimizerWrapper):
             samples = rng.uniform(intervals[:-1], intervals[1:])
             rng.shuffle(samples)
             data[k] = samples
+        # Categorical: random choice
+        for k, cats in self._param_categories.items():
+            data[k] = rng.choice(cats, size=n_init)
         return pd.DataFrame(data)
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> None:
-        df = X[self._param_names].astype(float).copy()
-        df["y"] = y.values
+    def fit(self, X: pd.DataFrame, y: pd.DataFrame | pd.Series) -> None:
+        df = X[self._param_names].copy()
+        # Cast continuous columns to float; leave categoricals as-is
+        float_cols = list(self._param_bounds.keys())
+        df[float_cols] = df[float_cols].astype(float)
+        if isinstance(y, pd.DataFrame):
+            for col in y.columns:
+                df[col] = y[col].values
+        else:
+            df[self._objectives[0][0]] = y.values
         self._measurements = df
 
     def suggest(self, n: int = 1) -> Optional[pd.DataFrame]:
@@ -230,86 +329,75 @@ class BaybeWrapper(BaseOptimizerWrapper):
 
 
 # ---------------------------------------------------------------------------
-# EDBO+ wrapper
+# EDBO+ wrapper (continuous-only, single-objective, discrete grid)
 # ---------------------------------------------------------------------------
 
 class EdboplusWrapper(BaseOptimizerWrapper):
-    """EDBO+ wrapper for discrete-scope BO benchmarking.
-
-    EDBO+ is designed for reaction optimization over a predefined scope.
-    This wrapper materialises a fine grid over the continuous parameter space
-    as the 'reaction scope' and uses EDBO+ to rank candidates each iteration.
-    """
+    """EDBO+ wrapper for discrete-scope BO benchmarking."""
 
     name = "edboplus"
     label = "EDBO+ (BoTorch)"
 
-    def setup(self, param_bounds: ParamBounds, minimize: bool = False) -> None:
-        import os
-        import tempfile
+    def setup(
+        self,
+        param_bounds: ParamBounds,
+        param_categories: Optional[ParamCategories] = None,
+        objectives: Optional[Objectives] = None,
+        minimize: bool = False,
+    ) -> None:
+        import os, tempfile
 
-        self._param_bounds = param_bounds
+        self._objectives = _resolve_objectives(objectives, minimize)
         self._param_names = list(param_bounds.keys())
-        self._minimize = minimize
+        self._minimize = self._objectives[0][1]
         self._tmpdir = tempfile.mkdtemp(prefix="edboplus_")
         self._csv_path = os.path.join(self._tmpdir, "scope.csv")
 
         n_dims = len(param_bounds)
         if n_dims <= 2:
-            n_grid = 30
-            grids = [np.linspace(v[0], v[1], n_grid) for v in param_bounds.values()]
+            grids = [np.linspace(v[0], v[1], 30) for v in param_bounds.values()]
             from itertools import product as iproduct
-            pts = list(iproduct(*grids))
-            self._scope_df = pd.DataFrame(pts, columns=self._param_names)
+            self._scope_df = pd.DataFrame(list(iproduct(*grids)), columns=self._param_names)
         else:
             rng = np.random.default_rng(42)
-            data = {k: rng.uniform(v[0], v[1], 1000) for k, v in param_bounds.items()}
-            self._scope_df = pd.DataFrame(data)
-
+            self._scope_df = pd.DataFrame(
+                {k: rng.uniform(v[0], v[1], 1000) for k, v in param_bounds.items()}
+            )
         self._scope_df.to_csv(self._csv_path, index=False)
 
     def initialize(self, n_init: int, seed: int = 0) -> pd.DataFrame:
         from edbo.plus.optimizer_botorch import EDBOplus
-
         self._scope_df.to_csv(self._csv_path, index=False)
         optimizer = EDBOplus()
         result = optimizer.run(
             objectives=["y"],
             objective_mode=["min" if self._minimize else "max"],
-            directory=self._tmpdir,
-            filename="scope.csv",
-            batch=n_init,
-            seed=seed,
+            directory=self._tmpdir, filename="scope.csv",
+            batch=n_init, seed=seed,
         )
-        top = result[result["priority"] == 1].head(n_init)
-        return top[self._param_names].reset_index(drop=True)
+        return result[result["priority"] == 1].head(n_init)[self._param_names].reset_index(drop=True)
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> None:
+    def fit(self, X: pd.DataFrame, y: pd.DataFrame | pd.Series) -> None:
         from scipy.spatial.distance import cdist
-
+        y_series = y.iloc[:, 0] if isinstance(y, pd.DataFrame) else y
         scope_df = self._scope_df.copy()
         scope_df["y"] = "PENDING"
         X_np = X[self._param_names].values
         scope_np = scope_df[self._param_names].values
-        for xi, yi in zip(X_np, y.values):
-            d = cdist([xi], scope_np, metric="cityblock")
-            idx = int(np.argmin(d))
+        for xi, yi in zip(X_np, y_series.values):
+            idx = int(np.argmin(cdist([xi], scope_np, metric="cityblock")))
             scope_df.at[idx, "y"] = float(yi)
         scope_df.to_csv(self._csv_path, index=False)
 
     def suggest(self, n: int = 1) -> Optional[pd.DataFrame]:
         from edbo.plus.optimizer_botorch import EDBOplus
-
         optimizer = EDBOplus()
         result = optimizer.run(
             objectives=["y"],
             objective_mode=["min" if self._minimize else "max"],
-            directory=self._tmpdir,
-            filename="scope.csv",
-            batch=n,
+            directory=self._tmpdir, filename="scope.csv", batch=n,
         )
-        top = result[result["priority"] == 1].head(n)
-        return top[self._param_names].reset_index(drop=True)
+        return result[result["priority"] == 1].head(n)[self._param_names].reset_index(drop=True)
 
     @staticmethod
     def is_available() -> bool:

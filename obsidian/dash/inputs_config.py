@@ -128,7 +128,7 @@ def setup_config_callbacks(app):
     # Store all of the input and settings into config
     @app.callback(
         Output('store-config', 'data'),
-        Input('input-response_name', 'value'),
+        Input('store-responses', 'data'),
         Input('input-optimizer_seed', 'value'),
         Input('input-f_transform', 'value'),
         Input('input-surrogate', 'value'),
@@ -139,19 +139,19 @@ def setup_config_callbacks(app):
         Input({'type': 'input-alpha', 'index': ALL}, 'value'),
         prevent_initial_call=True
     )
-    def compile_config(response_name, optimizer_seed, f_transform, surrogate,
+    def compile_config(responses, optimizer_seed, f_transform, surrogate,
                        m_batch, optim_sequential, optim_restarts, aq, alpha):
-        
+
+        responses = responses or []
         config = {}
-        
-        config['response_name'] = response_name
+        config['responses'] = responses
+        config['response_name'] = responses[0]['name'] if responses else None
         config['optimizer_seed'] = int(optimizer_seed) if optimizer_seed is not None else None
         config['surrogate_params'] = {'f_transform': f_transform, 'surrogate': surrogate}
-        # TODO: Re-implement hyperparmeters based on selection in alpha
         config['aq_params'] = {'optim_sequential': optim_sequential, 'optim_restarts': optim_restarts,
                                'm_batch': m_batch, 'acquisition': aq}
         config['verbose'] = 0
-        
+
         return config
     
     @app.callback(

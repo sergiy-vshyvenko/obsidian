@@ -19,6 +19,15 @@ from obsidian.unified.optimizer_wrappers import get_available_optimizers
 _active_wrapper = {"instance": None}
 
 
+def _get_responses(config):
+    """Return [{name, aim}] from config."""
+    responses = (config or {}).get('responses')
+    if responses:
+        return responses
+    name = (config or {}).get('response_name')
+    return [{'name': name, 'aim': 'max'}] if name else []
+
+
 def setup_optimize(app, app_tabs):
 
     available = get_available_optimizers()
@@ -110,44 +119,49 @@ def setup_optimize_callbacks(app):
             return 0, None
 
         backend = backend or "obsidian"
+        responses = _get_responses(config)
+        if not responses:
+            return 0, None
+
+        X_space = ParamSpace.load_state(Xspace_save)
+        df = pd.DataFrame(X0)
 
         if backend == "obsidian":
-            X_space = ParamSpace.load_state(Xspace_save)
-            target = Target(config['response_name'], aim='max')
-            campaign = Campaign(X_space, target)
-            campaign.add_data(pd.DataFrame(X0))
+            targets = [Target(r['name'], aim=r['aim']) for r in responses]
+            campaign = Campaign(X_space, targets if len(targets) > 1 else targets[0])
+            campaign.add_data(df)
             optimizer = BayesianOptimizer(X_space=campaign.X_space,
                                           surrogate=config['surrogate_params']['surrogate'])
             campaign.set_optimizer(optimizer)
             campaign.fit()
             return 0, {"backend": "obsidian", "state": campaign.optimizer.save_state()}
 
-        # BoFire / BayBe path
-        X_space = ParamSpace.load_state(Xspace_save)
-        param_bounds = {
-            p.name: (p.min, p.max)
-            for p in X_space.params
-            if isinstance(p, Param_Continuous)
-        }
+        # BoFire / BayBe — extract continuous bounds and categorical params
+        param_bounds = {p.name: (p.min, p.max) for p in X_space.params
+                        if isinstance(p, Param_Continuous)}
+        param_categories = {p.name: list(p.categories) for p in X_space.params
+                            if isinstance(p, (Param_Categorical, Param_Ordinal))}
 
         wrapper_map = {w.name: w for w in get_available_optimizers()}
         WrapperClass = wrapper_map.get(backend)
         if WrapperClass is None:
             return 0, None
 
-        response_name = config['response_name']
+        objectives = [(r['name'], r['aim'] == 'min') for r in responses]
         wrapper = WrapperClass()
-        wrapper.setup(param_bounds, minimize=False)
+        wrapper.setup(param_bounds, param_categories=param_categories or None,
+                      objectives=objectives)
 
-        df = pd.DataFrame(X0)
-        X = df[list(param_bounds.keys())]
-        y = df[response_name]
+        all_param_names = list(param_bounds.keys()) + list(param_categories.keys())
+        X = df[all_param_names]
+        response_names = [r['name'] for r in responses]
+        y = df[response_names] if len(response_names) > 1 else df[response_names[0]]
         wrapper.fit(X, y)
 
         _active_wrapper["instance"] = wrapper
         return 0, {"backend": backend, "fitted": True,
-                   "param_names": list(param_bounds.keys()),
-                   "response_name": response_name}
+                   "param_names": all_param_names,
+                   "response_names": response_names}
 
     @app.callback(
         Output('div-fit', 'children'),
@@ -164,18 +178,25 @@ def setup_optimize_callbacks(app):
         if backend == "obsidian":
             state = opt_save["state"] if isinstance(opt_save, dict) else opt_save
             optimizer = load_optimizer(config, state)
-            return dbc.ListGroup([
+            responses = _get_responses(config)
+            items = [
                 dbc.ListGroupItem(['Model Type: ', f'{optimizer.surrogate_type}']),
                 dbc.ListGroupItem(['Data Name: ', filename]),
-                dbc.ListGroupItem(['R', html.Sup('2'), ' Score: ', f'{optimizer.surrogate[0].r2_score:.4g}']),
-                dbc.ListGroupItem(['Marginal Log Likelihood: ', f'{optimizer.surrogate[0].loss:.4g}']),
-            ], flush=True)
+            ]
+            for i, surr in enumerate(optimizer.surrogate):
+                label = responses[i]['name'] if i < len(responses) else f'Response {i+1}'
+                items += [
+                    dbc.ListGroupItem([f'{label} R', html.Sup('2'), ': ', f'{surr.r2_score:.4g}']),
+                    dbc.ListGroupItem([f'{label} MLL: ', f'{surr.loss:.4g}']),
+                ]
+            return dbc.ListGroup(items, flush=True)
 
         backend_labels = {"bofire": "BoFire (BoTorch)", "baybe": "BayBe (BoTorch)"}
+        response_names = opt_save.get("response_names", [opt_save.get("response_name", "")])
         return dbc.ListGroup([
             dbc.ListGroupItem(['Backend: ', backend_labels.get(backend, backend)]),
             dbc.ListGroupItem(['Data Name: ', filename]),
-            dbc.ListGroupItem(['Response: ', opt_save.get("response_name", "")]),
+            dbc.ListGroupItem(['Responses: ', ', '.join(response_names)]),
             dbc.ListGroupItem('Surrogate fitted successfully'),
         ], flush=True)
 
@@ -225,9 +246,13 @@ def setup_optimize_callbacks(app):
             )
 
         if backend == "obsidian":
+            responses = _get_responses(config)
             state = opt_save["state"] if isinstance(opt_save, dict) else opt_save
             optimizer = load_optimizer(config, state)
-            X_suggest, eval_suggest = optimizer.suggest(**config['aq_params'])
+            aq_params = dict(config['aq_params'])
+            if len(responses) > 1:
+                aq_params['acquisition'] = ['NEHVI']
+            X_suggest, eval_suggest = optimizer.suggest(**aq_params)
             df_suggest = pd.concat([X_suggest, eval_suggest], axis=1)
             df_suggest.insert(loc=0, column='CandidatesID', value=df_suggest.index)
             tables = [center(make_table(df_suggest))]
