@@ -238,6 +238,7 @@ class BaybeWrapper(BaseOptimizerWrapper):
 
     Supports continuous and categorical parameters.
     Single-objective uses NumericalTarget; multi-objective uses ParetoObjective.
+    Uses baybe.Campaign so the fitted surrogate is accessible via predict().
     """
 
     name = "baybe"
@@ -250,24 +251,18 @@ class BaybeWrapper(BaseOptimizerWrapper):
         objectives: Optional[Objectives] = None,
         minimize: bool = False,
     ) -> None:
+        from baybe.parameters import NumericalContinuousParameter, CategoricalParameter
+        from baybe.searchspace import SearchSpace
+        from baybe.targets import NumericalTarget
+
         self._objectives = _resolve_objectives(objectives, minimize)
         self._param_bounds = param_bounds
         self._param_categories = param_categories or {}
         self._param_names = list(param_bounds.keys()) + list(self._param_categories.keys())
-        self._measurements: Optional[pd.DataFrame] = None
-        self._searchspace = None
-        self._objective = None
-        self._recommender = None
-
-    def _build_objects(self) -> None:
-        from baybe.parameters import NumericalContinuousParameter, CategoricalParameter
-        from baybe.recommenders import BotorchRecommender
-        from baybe.searchspace import SearchSpace
-        from baybe.targets import NumericalTarget
 
         params = [
             NumericalContinuousParameter(name=k, bounds=(float(v[0]), float(v[1])))
-            for k, v in self._param_bounds.items()
+            for k, v in param_bounds.items()
         ]
         for k, cats in self._param_categories.items():
             params.append(CategoricalParameter(name=k, values=list(cats)))
@@ -276,12 +271,12 @@ class BaybeWrapper(BaseOptimizerWrapper):
 
         targets = [NumericalTarget(name=name, minimize=min_) for name, min_ in self._objectives]
         if len(targets) == 1:
-            self._objective = targets[0].to_objective()
+            self._baybe_objective = targets[0].to_objective()
         else:
             from baybe.objectives import ParetoObjective
-            self._objective = ParetoObjective(targets=targets)
+            self._baybe_objective = ParetoObjective(targets=targets)
 
-        self._recommender = BotorchRecommender()
+        self._campaign = None
 
     def initialize(self, n_init: int, seed: int = 0) -> pd.DataFrame:
         rng = np.random.default_rng(seed)
@@ -291,14 +286,22 @@ class BaybeWrapper(BaseOptimizerWrapper):
             samples = rng.uniform(intervals[:-1], intervals[1:])
             rng.shuffle(samples)
             data[k] = samples
-        # Categorical: random choice
         for k, cats in self._param_categories.items():
             data[k] = rng.choice(cats, size=n_init)
         return pd.DataFrame(data)
 
+    def _build_campaign(self) -> None:
+        from baybe.recommenders import BotorchRecommender
+        from baybe import Campaign as BaybeCampaign
+
+        self._campaign = BaybeCampaign(
+            searchspace=self._searchspace,
+            objective=self._baybe_objective,
+            recommender=BotorchRecommender(),
+        )
+
     def fit(self, X: pd.DataFrame, y: pd.DataFrame | pd.Series) -> None:
         df = X[self._param_names].copy()
-        # Cast continuous columns to float; leave categoricals as-is
         float_cols = list(self._param_bounds.keys())
         df[float_cols] = df[float_cols].astype(float)
         if isinstance(y, pd.DataFrame):
@@ -306,18 +309,25 @@ class BaybeWrapper(BaseOptimizerWrapper):
                 df[col] = y[col].values
         else:
             df[self._objectives[0][0]] = y.values
-        self._measurements = df
+        # Rebuild campaign each fit so measurements don't accumulate across calls
+        self._build_campaign()
+        self._campaign.add_measurements(df)
 
     def suggest(self, n: int = 1) -> Optional[pd.DataFrame]:
-        if self._searchspace is None:
-            self._build_objects()
-        candidates = self._recommender.recommend(
-            batch_size=n,
-            searchspace=self._searchspace,
-            objective=self._objective,
-            measurements=self._measurements,
-        )
+        if self._campaign is None:
+            return None
+        candidates = self._campaign.recommend(batch_size=n)
         return candidates[self._param_names].reset_index(drop=True)
+
+    def predict(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Return posterior mean and std for each objective at the given X points."""
+        if self._campaign is None:
+            return pd.DataFrame()
+        surrogate = self._campaign.get_surrogate()
+        cols = X[self._param_names].copy()
+        cols[list(self._param_bounds.keys())] = cols[list(self._param_bounds.keys())].astype(float)
+        stats = surrogate.posterior_stats(cols, stats=["mean", "std"])
+        return stats.reset_index(drop=True)
 
     @staticmethod
     def is_available() -> bool:

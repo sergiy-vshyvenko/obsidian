@@ -10,6 +10,7 @@ from dash.exceptions import PreventUpdate
 
 from obsidian.experiment import ExpDesigner
 from obsidian.parameters import ParamSpace
+from obsidian.dash.optimize import _active_wrapper
 
 
 def setup_predict(app, app_tabs):
@@ -192,6 +193,13 @@ def setup_predict_callbacks(app):
             optimizer = load_optimizer(config, state)
             preds = optimizer.predict(df)
             df_output = pd.concat([df.reset_index(drop=True), preds.reset_index(drop=True)], axis=1)
+        elif backend == "baybe":
+            wrapper = _active_wrapper.get("instance")
+            if wrapper is not None and hasattr(wrapper, "predict"):
+                preds = wrapper.predict(df)
+                df_output = pd.concat([df.reset_index(drop=True), preds.reset_index(drop=True)], axis=1)
+            else:
+                df_output = df
         else:
             df_output = df
         return make_table(df_output, fill_width=True), filename
