@@ -203,7 +203,7 @@ def setup_data_callbacks(app):
         Input({'type': 'button-response_delete', 'index': MATCH}, 'n_clicks'),
         prevent_initial_call=True,
     )
-    def delete_response_row(n_clicks, _children):
+    def delete_response_row(n_clicks):
         return None, 0
 
     # Collect all response rows into store-responses
