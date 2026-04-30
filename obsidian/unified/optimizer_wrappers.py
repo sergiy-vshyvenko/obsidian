@@ -117,7 +117,7 @@ class ObsidianWrapper(BaseOptimizerWrapper):
         self._campaign.fit()
 
     def suggest(self, n: int = 1) -> Optional[pd.DataFrame]:
-        result = self._campaign.suggest(n_suggest=n)
+        result = self._campaign.suggest(m_batch=n)
         if result is None:
             return None
         X_suggest, _ = result
