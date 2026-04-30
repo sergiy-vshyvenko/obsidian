@@ -9,6 +9,7 @@ import io
 from dash.exceptions import PreventUpdate
 
 from obsidian.experiment import ExpDesigner
+from obsidian.parameters import ParamSpace
 
 
 def setup_predict(app, app_tabs):
@@ -131,13 +132,21 @@ def setup_predict_callbacks(app):
         Input('button-template', 'n_clicks'),
         State('store-fit', 'data'),
         State('store-config', 'data'),
+        State('store-Xspace', 'data'),
     )
-    def config_InputTemplate(clicked, opt_save, config):
+    def config_InputTemplate(clicked, opt_save, config, Xspace_save):
         if config is None:
             return 0, None, {}
-        state = opt_save.get("state", opt_save) if isinstance(opt_save, dict) else opt_save
-        optimizer = load_optimizer(config, state)
-        designer = ExpDesigner(optimizer.X_space, seed=0)
+        backend = opt_save.get("backend", "obsidian") if isinstance(opt_save, dict) else "obsidian"
+        if backend == "obsidian":
+            state = opt_save.get("state", opt_save) if isinstance(opt_save, dict) else opt_save
+            optimizer = load_optimizer(config, state)
+            X_space = optimizer.X_space
+        else:
+            if not Xspace_save:
+                return 0, None, {}
+            X_space = ParamSpace.load_state(Xspace_save)
+        designer = ExpDesigner(X_space, seed=0)
         df_template = designer.initialize(3, 'LHS')
         tables = [center(make_table(df_template))]
         return 0, tables, df_template.to_dict()
@@ -177,10 +186,14 @@ def setup_predict_callbacks(app):
     )
     def preview_X1(data, filename, opt_save, config):
         df = pd.DataFrame(data)
-        state = opt_save.get("state", opt_save) if isinstance(opt_save, dict) else opt_save
-        optimizer = load_optimizer(config, state)
-        preds = optimizer.predict(df)
-        df_output = pd.concat([df.reset_index(drop=True), preds.reset_index(drop=True)], axis=1)
+        backend = opt_save.get("backend", "obsidian") if isinstance(opt_save, dict) else "obsidian"
+        if backend == "obsidian":
+            state = opt_save.get("state", opt_save) if isinstance(opt_save, dict) else opt_save
+            optimizer = load_optimizer(config, state)
+            preds = optimizer.predict(df)
+            df_output = pd.concat([df.reset_index(drop=True), preds.reset_index(drop=True)], axis=1)
+        else:
+            df_output = df
         return make_table(df_output, fill_width=True), filename
     
     return
