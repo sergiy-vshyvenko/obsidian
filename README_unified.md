@@ -161,11 +161,12 @@ app_unified.py                 # entry point
 Every backend is wrapped behind a common five-method interface:
 
 ```python
-wrapper.setup(param_bounds, minimize)   # configure parameter space
-wrapper.initialize(n_init, seed)        # generate initial DoE → DataFrame
-wrapper.fit(X, y)                       # train surrogate
-wrapper.suggest(n)                      # propose next point(s) → DataFrame
-wrapper.is_available()                  # True if backend is importable
+wrapper.setup(param_bounds, param_categories, objectives, minimize)  # configure space + objectives
+wrapper.initialize(n_init, seed)   # generate initial DoE → DataFrame
+wrapper.fit(X, y)                  # train surrogate (y: Series for SOO, DataFrame for MOO)
+wrapper.suggest(n)                 # propose next point(s) → DataFrame
+wrapper.predict(X)                 # posterior mean + std → DataFrame (BayBe / Obsidian only)
+wrapper.is_available()             # True if backend is importable
 ```
 
 ### Running a benchmark programmatically
@@ -206,16 +207,48 @@ The UI picks it up automatically on the next server start.
 
 ## Installation recipes
 
+Clone the repo first:
+
+```bash
+git clone https://github.com/sergiy-vshyvenko/obsidian.git
+cd obsidian
+```
+
 ### Obsidian + BoFire + BayBe (recommended)
+
+Verified working on Python 3.11:
 
 ```bash
 conda create -n boopt python=3.11
 conda activate boopt
 pip install -e ".[app]"
-pip install "bofire[optimization]" baybe
+pip install "bofire[optimization]" "cvxpy==1.5.4" baybe
 ```
 
+> **Why `cvxpy==1.5.4`?** BoFire pulls in cvxpy, and cvxpy ≥ 1.6 requires NumPy 2.x.
+> Pinning to 1.5.4 keeps NumPy on the 1.26.x series that obsidian's core requires.
+
+Verified package versions (as of April 2026):
+
+| Package | Version |
+|---|---|
+| Python | 3.11 |
+| torch | 2.3.0 |
+| botorch | 0.11.3 |
+| gpytorch | 1.12 |
+| numpy | 1.26.4 |
+| pandas | 2.3.3 |
+| scipy | 1.13.1 |
+| dash | 4.1.0 |
+| dash-bootstrap-components | 2.0.4 |
+| dash-daq | 0.6.0 |
+| pillow | 12.1.1 |
+| cvxpy | 1.5.4 |
+
 ### Obsidian + EDBO+ (isolated)
+
+EDBO+ pins `botorch==0.5.0` / `torch==1.10.0` / `numpy==1.21.5` — incompatible with BoFire/BayBe.
+Use a dedicated environment:
 
 ```bash
 conda create -n edboplus python=3.10
@@ -227,6 +260,8 @@ pip install -e ".[app]"
 ### Obsidian only (no optional backends)
 
 ```bash
+conda create -n obsidian python=3.11
+conda activate obsidian
 pip install -e ".[app]"
 ```
 
