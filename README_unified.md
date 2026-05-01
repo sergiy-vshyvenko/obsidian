@@ -219,8 +219,8 @@ cd obsidian
 Verified working on Python 3.11:
 
 ```bash
-conda create -n boopt python=3.11
-conda activate boopt
+mamba create -n boopt python=3.11
+mamba activate boopt
 pip install -e ".[app]"
 pip install "bofire[optimization]" "cvxpy==1.5.4" baybe
 ```
